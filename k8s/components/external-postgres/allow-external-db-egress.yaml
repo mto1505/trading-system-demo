@@ -1,0 +1,23 @@
+# default-deny chặn mọi egress ra ngoài cluster, nên database ngoài cần một lỗ
+# tường minh. NetworkPolicy cộng dồn (union), vì vậy đây là resource MỚI chứ
+# không phải patch đè lên trading-apps-egress - patch sẽ thay cả danh sách
+# egress và vô tình cắt đường tới Kafka/Redis/Zipkin.
+#
+# Sửa CIDR cho đúng subnet của managed DB. Để 0.0.0.0/0 là mở toang.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-db-egress
+  namespace: trading
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [pricing, order, matching]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.20.0.0/24       # <- subnet của RDS/Cloud SQL
+      ports: [{ protocol: TCP, port: 5432 }]

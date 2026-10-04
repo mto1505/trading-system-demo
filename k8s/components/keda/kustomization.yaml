@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Yêu cầu KEDA đã cài trong cluster:
+#   helm repo add kedacore https://kedacore.github.io/charts
+#   helm install keda kedacore/keda -n keda --create-namespace
+resources:
+  - scaledobject-pricing-risk.yaml
+  - scaledobject-matching-engine.yaml

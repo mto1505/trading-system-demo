@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: taskapp-staging
+
+resources:
+  - ../../base
+
+images:
+  # Staging tracks a moving tag; prod never does.
+  - name: ghcr.io/example/k8s-practice
+    newTag: main
+
+replicas:
+  - name: taskapp
+    count: 2
+
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    literals:
+      - APP_ENV=staging
+      - APP_MESSAGE=Task API (staging)
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres.taskapp-staging.svc.cluster.local:5432/taskdb?currentSchema=app&ApplicationName=taskapp&connectTimeout=3&socketTimeout=30
+
+secretGenerator:
+  - name: db-credentials
+    envs:
+      - secrets.env
+
+patches:
+  - path: patch-hpa.yaml
+  - path: patch-ingress.yaml
+  - path: patch-db-host.yaml

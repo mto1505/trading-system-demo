@@ -1,0 +1,19 @@
+# Trần cứng cho cả namespace: KEDA/HPA có lỗi cũng không ăn hết cluster.
+# LƯU Ý: liệt kê resource nào ở đây thì resource đó thành BẮT BUỘC trên mọi pod.
+# `limits.cpu` cố ý bị bỏ ra để workload được phép chạy không có CPU limit
+# (xem giải thích chống throttling ở limitrange.yaml).
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: namespace-quota
+  namespace: trading
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.memory: 32Gi
+    persistentvolumeclaims: "8"
+    requests.storage: 120Gi
+    pods: "50"
+    services.loadbalancers: "1"
+    services.nodeports: "0"      # không expose NodePort trong namespace này

@@ -1,0 +1,44 @@
+# Mở đường ra Kafka ngoài cluster cho 4 service, Schema Registry và Job tạo
+# topic. 9092 plaintext, 9093/9094 cho TLS/SASL tuỳ cấu hình broker.
+#
+# Sửa CIDR cho đúng subnet của Kafka. Confluent Cloud/MSK public endpoint thì
+# phải thay bằng CIDR do nhà cung cấp công bố - đừng để 0.0.0.0/0.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-kafka-egress
+  namespace: trading
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [gateway, pricing, order, matching]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.30.0.0/24       # <- subnet của Kafka cluster
+      ports:
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9094 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-kafka-egress-platform
+  namespace: trading
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [schema-registry, kafka-topics-init]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.30.0.0/24
+      ports:
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9094 }

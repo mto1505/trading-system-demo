@@ -1,0 +1,53 @@
+# KEDA - KHẮC PHỤC nhược điểm của HPA CPU-based với Kafka consumer:
+#
+# HPA nhìn CPU: consumer có thể lag hàng triệu message mà CPU vẫn thấp
+# (VD: nghẽn vì chờ producer downstream) -> HPA không scale. Ngược lại
+# CPU cao do GC -> scale vô ích. KEDA nhìn thẳng CONSUMER LAG - đúng tín hiệu.
+#
+# Cài KEDA trước:  helm repo add kedacore https://kedacore.github.io/charts
+#                  helm install keda kedacore/keda -n keda --create-namespace
+#
+# LƯU Ý: apply file này thì XOÁ HPA cũ (kubectl delete hpa pricing-risk-hpa -n trading)
+# - KEDA tự tạo HPA bên dưới, 2 HPA cùng target 1 deployment sẽ đánh nhau.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: pricing-risk-scaler
+  namespace: trading
+spec:
+  scaleTargetRef:
+    name: pricing-risk-service
+  minReplicaCount: 2
+  maxReplicaCount: 4          # 12 partition / concurrency 3 = 4 pod là trần hiệu quả
+  cooldownPeriod: 300         # tránh flapping
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-0.kafka.trading.svc.cluster.local:9092
+        consumerGroup: pricing-risk-group
+        topic: stock.ticks
+        lagThreshold: "1000"          # lag trung bình/partition vượt 1000 -> thêm pod
+        activationLagThreshold: "100"
+
+---
+# KEDA cho matching-engine: cùng nguyên lý - đo LAG chứ không đo CPU.
+# maxReplicaCount 4 vì 12 partition / concurrency 3 = 4 pod là trần hữu ích;
+# pod thứ 5 sẽ ngồi không vì không còn partition để nhận.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: matching-engine-scaler
+  namespace: trading
+spec:
+  scaleTargetRef:
+    name: matching-engine
+  minReplicaCount: 2
+  maxReplicaCount: 4
+  cooldownPeriod: 120        # chống giật: không co lại ngay khi lag vừa hạ
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-0.kafka.trading.svc.cluster.local:9092
+        consumerGroup: matching-engine-group
+        topic: stock.orders
+        lagThreshold: "500"   # lệnh nhạy cảm hơn tick -> ngưỡng thấp hơn (tick dùng 1000)

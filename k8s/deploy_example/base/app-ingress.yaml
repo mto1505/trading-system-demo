@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: taskapp
+  namespace: taskapp
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "5"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    # Crude but effective first line against scrapers and credential stuffing.
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
+    # Security response headers are set by the application
+    # (SecurityHeadersFilter), NOT by a `configuration-snippet` annotation here.
+    # ingress-nginx >= 1.9 rejects snippet annotations by default: a snippet lets
+    # anyone able to create an Ingress inject arbitrary nginx config. Enabling
+    # `allow-snippet-annotations` to work around that would trade a real security
+    # boundary for a header. See deploy/DECISIONS.md section 6.5.
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - tasks.example.com
+      secretName: taskapp-tls      # filled in by cert-manager
+  rules:
+    - host: tasks.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: taskapp
+                port:
+                  name: http

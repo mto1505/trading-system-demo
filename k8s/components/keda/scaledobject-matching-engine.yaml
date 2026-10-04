@@ -1,0 +1,27 @@
+# Cùng nguyên lý với pricing-risk (xem chú thích chi tiết ở file đó), nhưng
+# ngưỡng THẤP HƠN: một lệnh chờ khớp nhạy cảm hơn một tick giá trễ.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: matching-engine
+  namespace: trading
+spec:
+  scaleTargetRef:
+    name: matching-engine
+  minReplicaCount: 2
+  maxReplicaCount: 4          # = partition / setConcurrency(3) ở matching/config/KafkaConfig.java
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # Co lại chậm hơn giãn ra: rebalance consumer group làm dừng xử lý
+          # vài giây, nên đừng co ngay khi lag vừa hạ.
+          stabilizationWindowSeconds: 120
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServersFromEnv: KAFKA_BOOTSTRAP
+        consumerGroup: matching-engine-group
+        topic: stock.orders
+        lagThreshold: "500"           # lag trên mỗi replica (xem ghi chú ở file pricing)
+        activationLagThreshold: "50"  # chỉ dùng khi scale-to-zero

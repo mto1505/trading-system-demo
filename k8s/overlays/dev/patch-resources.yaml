@@ -1,0 +1,16 @@
+# Dev chạy trên laptop/minikube: ép mọi thứ vừa một máy.
+# 768Mi là SÀN của JVM này - thấp hơn thì heap + metaspace + code cache không
+# đủ và container bị OOMKill ngay lúc Flyway + Hibernate khởi động.
+# (patch này gắn vào 4 Deployment ứng dụng qua `target` trong kustomization)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: set-by-target   # bi `target` trong kustomization ghi de
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          resources:
+            requests: { cpu: 100m, memory: 768Mi }
+            limits:   { memory: 768Mi }

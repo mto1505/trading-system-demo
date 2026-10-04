@@ -1,0 +1,14 @@
+# Node drains / cluster upgrades must not take all replicas at once.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: taskapp
+  namespace: taskapp
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taskapp
+      app.kubernetes.io/component: api
+  # If every pod is already unhealthy, let the drain proceed rather than block it.
+  unhealthyPodEvictionPolicy: AlwaysAllow

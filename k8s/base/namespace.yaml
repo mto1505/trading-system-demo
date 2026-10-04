@@ -1,0 +1,15 @@
+# Tên namespace bị kustomize ghi đè theo từng overlay:
+#   dev -> trading-dev, staging -> trading-staging, prod -> trading-prod.
+#
+# Label pod-security: hệ này chạy được dưới chuẩn "restricted" (non-root,
+# drop ALL capability, read-only rootfs). Bật enforce ngay từ base để một
+# manifest tương lai vi phạm sẽ bị API server CHẶN chứ không chỉ cảnh báo.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trading
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

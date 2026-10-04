@@ -1,0 +1,31 @@
+# Zipkin in-memory cho demo. Production: Grafana Tempo hoặc Zipkin + Elasticsearch
+# (in-memory mất trace khi restart, không giữ được lịch sử).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zipkin
+  namespace: trading
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: zipkin }
+  template:
+    metadata:
+      labels: { app: zipkin }
+    spec:
+      containers:
+        - name: zipkin
+          image: openzipkin/zipkin:3
+          ports: [{ containerPort: 9411 }]
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: 500m, memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zipkin
+  namespace: trading
+spec:
+  selector: { app: zipkin }
+  ports: [{ port: 9411 }]

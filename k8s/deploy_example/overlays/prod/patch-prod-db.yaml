@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: taskapp
+spec:
+  template:
+    spec:
+      priorityClassName: taskapp-critical
+      containers:
+        - name: postgres
+          args:
+            - -c
+            - max_connections=200
+            - -c
+            - shared_buffers=1GB
+            - -c
+            - effective_cache_size=3GB
+            - -c
+            - work_mem=16MB
+            - -c
+            - maintenance_work_mem=256MB
+            - -c
+            - wal_level=replica
+            - -c
+            - max_wal_size=4GB
+            - -c
+            - log_min_duration_statement=250
+            - -c
+            - log_checkpoints=on
+          resources:
+            requests: { cpu: "1", memory: 4Gi }
+            limits:   { memory: 4Gi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: ssd-retain   # must be a class with reclaimPolicy: Retain
+        resources:
+          requests:
+            storage: 100Gi

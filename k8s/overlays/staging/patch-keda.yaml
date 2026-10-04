@@ -1,0 +1,9 @@
+# 6 partition / concurrency 3 = 2 pod là TRẦN hữu ích. Pod thứ 3 sẽ không
+# được giao partition nào và chỉ ngồi không.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: set-by-target
+spec:
+  minReplicaCount: 1
+  maxReplicaCount: 2

@@ -1,0 +1,71 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Dev chạy ĐÚNG bộ manifest của prod, chỉ khác các núm vặn. Đó là toàn bộ mục
+# đích của kustomize: thứ test ở dev giống về CẤU TRÚC với thứ lên prod.
+namespace: trading-dev
+
+resources:
+  - ../../base
+
+components:
+  # Cluster dev thường chưa có kube-prometheus-stack -> dựng Prometheus tối giản.
+  - ../../components/in-cluster-prometheus
+
+images:
+  # Build tại chỗ: docker build --build-arg MODULE=<svc> -t trading/<svc>:dev .
+  # (minikube: chạy `eval $(minikube docker-env)` trước khi build, khỏi cần registry)
+  - name: ghcr.io/trading-system/market-gateway
+    newName: trading/market-gateway
+    newTag: dev
+  - name: ghcr.io/trading-system/pricing-risk-service
+    newName: trading/pricing-risk-service
+    newTag: dev
+  - name: ghcr.io/trading-system/order-service
+    newName: trading/order-service
+    newTag: dev
+  - name: ghcr.io/trading-system/matching-engine
+    newName: trading/matching-engine
+    newTag: dev
+
+replicas:
+  # 3 partition / concurrency 3 = 1 pod là vừa đủ. Thêm pod chỉ tốn RAM.
+  - { name: market-gateway, count: 1 }
+  - { name: pricing-risk-service, count: 1 }
+  - { name: order-service, count: 1 }
+  - { name: matching-engine, count: 1 }
+
+configMapGenerator:
+  - name: trading-config
+    behavior: merge
+    literals:
+      # FQDN đầy đủ: KEDA và các controller NGOÀI namespace không dùng được tên
+      # ngắn. Dev chưa bật KEDA nhưng giữ cùng dạng với staging/prod.
+      - KAFKA_BOOTSTRAP=kafka-0.kafka.trading-dev.svc.cluster.local:9092
+      - KAFKA_PARTITIONS=3
+      - KAFKA_TOPIC_REPLICAS=1
+      - TRACING_PROBABILITY=1.0        # dev: trace mọi request để soi luồng
+      - SIMULATED_FEED=true
+      - OUTBOX_RELAY_ENABLED=true
+      - LOGGING_LEVEL_COM_TRADING=DEBUG
+
+secretGenerator:
+  - name: trading-secrets
+    envs:
+      - secrets.env          # gitignored; copy từ secrets.env.example
+
+generatorOptions:
+  disableNameSuffixHash: false    # đổi config -> hash mới -> tự rollout
+
+patches:
+  # Một patch dùng chung cho cả 4 Deployment ứng dụng (chọn bằng regex tên).
+  - path: patch-resources.yaml
+    target:
+      kind: Deployment
+      name: "market-gateway|pricing-risk-service|order-service|matching-engine"
+  - path: patch-kafka.yaml
+    target: { kind: StatefulSet, name: kafka }
+  - path: patch-postgres.yaml
+    target: { kind: StatefulSet, name: postgres }
+  - path: patch-ingress.yaml
+  - path: patch-quota.yaml

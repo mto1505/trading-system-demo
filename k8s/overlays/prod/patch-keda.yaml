@@ -1,0 +1,13 @@
+# 12 partition / concurrency 3 = 4 pod là TRẦN hữu ích. Muốn hơn thì phải tăng
+# partition trước (sửa KAFKA_PARTITIONS rồi chạy lại Job kafka-topics-init),
+# nếu không pod thứ 5 chỉ tốn tiền mà không nhận được partition nào.
+#
+# minReplicaCount phải BẰNG `replicas` trong kustomization.yaml, nếu không mỗi
+# lần `kubectl apply` sẽ kéo ngược số replica mà KEDA vừa đặt.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: set-by-target
+spec:
+  minReplicaCount: 2
+  maxReplicaCount: 4

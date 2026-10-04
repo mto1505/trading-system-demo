@@ -1,0 +1,19 @@
+# Kích hoạt: SPRING_PROFILES_ACTIVE=secure
+# Đặt file này thành application-secure.yml trong từng service.
+spring:
+  kafka:
+    properties:
+      security.protocol: SASL_SSL
+      sasl.mechanism: SCRAM-SHA-512
+      # Mật khẩu KHÔNG viết thẳng vào file - nạp từ K8s Secret qua biến môi trường
+      sasl.jaas.config: >
+        org.apache.kafka.common.security.scram.ScramLoginModule required
+        username="${KAFKA_USER}" password="${KAFKA_PASSWORD}";
+      ssl.truststore.location: ${KAFKA_TRUSTSTORE:/etc/kafka/secrets/truststore.jks}
+      ssl.truststore.password: ${KAFKA_TRUSTSTORE_PASSWORD}
+      ssl.endpoint.identification.algorithm: https   # chống man-in-the-middle
+
+# Schema Registry cũng phải bảo vệ - nếu không, ai cũng đăng ký được schema bậy
+schema:
+  registry:
+    url: https://schema-registry:8081

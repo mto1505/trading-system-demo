@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Kafka cho prod KHÔNG nên là StatefulSet tự viết: rolling upgrade, rack
+# awareness, reassign partition, TLS/ACL là việc của Operator hoặc managed
+# service. Dùng Strimzi (k8s/cluster/strimzi-kafka.yaml) / MSK / Confluent Cloud.
+#
+# Bật component này rồi đặt KAFKA_BOOTSTRAP (FQDN hoặc endpoint ngoài) và
+# KAFKA_TOPIC_REPLICAS=3 trong configMapGenerator của overlay.
+resources:
+  - allow-external-kafka-egress.yaml
+
+patches:
+  - path: delete-sts.yaml
+    target: { kind: StatefulSet, name: kafka }
+  - path: delete-svc.yaml
+    target: { kind: Service, name: kafka }
+  - path: delete-pdb.yaml
+    target: { kind: PodDisruptionBudget, name: kafka }
+  - path: delete-netpol.yaml
+    target: { kind: NetworkPolicy, name: kafka }

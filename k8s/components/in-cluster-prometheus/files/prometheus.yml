@@ -1,0 +1,28 @@
+# Prometheus tối giản cho dev/staging khi cluster CHƯA có kube-prometheus-stack.
+# Có stack rồi thì dùng component `monitoring` (ServiceMonitor) thay cho file này.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: trading-pods
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          own_namespace: true     # chỉ namespace của chính nó -> Role là đủ, không cần ClusterRole
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        target_label: application
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod

@@ -1,0 +1,65 @@
+# Alert nghiệp vụ, chuyển từ monitoring/alert-rules.yml sang dạng CRD để
+# Prometheus Operator tự nạp.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: trading-system
+  namespace: trading
+  labels:
+    app.kubernetes.io/part-of: trading-system
+spec:
+  groups:
+    - name: trading-latency
+      rules:
+        - alert: HighE2ELatency
+          expr: histogram_quantile(0.99, sum by (le) (rate(pricing_e2e_latency_seconds_bucket[1m]))) > 0.5
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "P99 latency tick->calc vuot 500ms"
+            description: "Kiem tra consumer lag stock.ticks va GC cua pricing-risk-service."
+
+    - name: trading-correctness
+      rules:
+        # Cảnh báo NGHIÊM TRỌNG NHẤT của hệ: lệnh đã ACCEPTED nhưng không bao
+        # giờ nhận được execution report -> khách bị giữ tiền cho lệnh treo.
+        - alert: SagaStuckOrders
+          expr: (orders_accepted_total - (orders_filled_total + orders_rejected_by_matching_total)) > 10
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "Co lenh ACCEPTED khong nhan duoc execution report"
+            description: "Kiem tra outbox_publish_failed_total, matching-engine con song khong, lag topic stock.orders/stock.executions."
+
+        # Outbox tắc: event đã ghi vào DB nhưng không ra được Kafka. Đây là
+        # điểm đứt của transactional outbox - im lặng thì mất event.
+        - alert: OutboxPublishFailing
+          expr: rate(outbox_publish_failed_total[5m]) > 0
+          for: 1m
+          labels: { severity: critical }
+          annotations:
+            summary: "OutboxRelay dang that bai khi publish"
+
+        - alert: OrderRejectSpike
+          expr: rate(orders_rejected_total[5m]) > 10
+          for: 1m
+          labels: { severity: warning }
+          annotations:
+            summary: "Ty le tu choi lenh tang bat thuong"
+
+    - name: trading-availability
+      rules:
+        - alert: TradingServiceDown
+          expr: up{job=~".*trading.*"} == 0
+          for: 30s
+          labels: { severity: critical }
+          annotations:
+            summary: "Service {{ $labels.pod }} khong phan hoi scrape"
+
+        # DLT có message nghĩa là đã retry hết mà vẫn hỏng - phải có người xem.
+        - alert: DeadLetterTopicGrowing
+          expr: sum(rate(kafka_consumer_fetch_manager_records_consumed_total{topic=~"stock\..*\.DLT"}[5m])) > 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Co message roi vao Dead Letter Topic"

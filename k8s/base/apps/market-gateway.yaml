@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: market-gateway
+  namespace: trading
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: market-gateway
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: market-gateway
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: trading-system
+spec:
+  selector:
+    app.kubernetes.io/name: market-gateway
+  ports:
+    - { name: http, port: 8081, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-gateway
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: market-gateway
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: trading-system
+spec:
+  # CẢNH BÁO SCALE: gateway gắn với MỘT session feed thị trường. Chạy >1 replica
+  # với feed thật = nhận trùng tick và nhân đôi tải xuống downstream. Muốn HA
+  # thì phải có leader election ở tầng ứng dụng trước, chưa có thì giữ 1.
+  replicas: 1
+  revisionHistoryLimit: 5
+  minReadySeconds: 15
+  progressDeadlineSeconds: 600
+  strategy:
+    type: Recreate          # một feed tại một thời điểm -> không surge
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: market-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: market-gateway
+        app.kubernetes.io/component: gateway
+        app.kubernetes.io/part-of: trading-system
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: market-gateway
+      automountServiceAccountToken: false
+      # preStop 5s + graceful shutdown 30s + dự phòng.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: app
+          image: ghcr.io/trading-system/market-gateway:REPLACED_BY_OVERLAY
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8081, protocol: TCP }
+          envFrom:
+            - configMapRef: { name: trading-config }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          resources:
+            # memory request == limit: pod không bị evict vì hàng xóm ồn ào.
+            # CPU không đặt limit -> không bị CFS throttle trên hot path tick.
+            requests: { cpu: 250m, memory: 1Gi }
+            limits:   { memory: 1Gi }
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36      # tới 3 phút cho JVM nguội
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            # Cố ý LỎNG hơn readiness: Kafka trục trặc thì pod phải rớt khỏi
+            # Service (readiness) chứ KHÔNG được restart vô ích (liveness).
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          lifecycle:
+            preStop:
+              # Endpoints bị gỡ bất đồng bộ. Phục vụ thêm 5s sau khi pod vào
+              # Terminating, nếu không client sẽ ăn connection reset.
+              sleep: { seconds: 5 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        # rootfs read-only nên JVM cần chỗ ghi tạm (hsperfdata, heap dump...).
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 128Mi }

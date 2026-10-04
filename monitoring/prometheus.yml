@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 10s      # trading system nên scrape dày (mặc định 1m quá thưa)
+
+scrape_configs:
+  - job_name: 'trading-services'
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - 'market-gateway:8081'
+          - 'pricing-risk-service:8082'
+          - 'order-service:8083'
+          - 'matching-engine:8084'

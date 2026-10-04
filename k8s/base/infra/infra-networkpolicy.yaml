@@ -1,0 +1,135 @@
+# Kafka: nhận từ 4 service, từ schema-registry và từ Job tạo topic.
+# Cổng 9093 (controller) mở cho chính pod Kafka để quorum KRaft hoạt động.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: kafka }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [gateway, pricing, order, matching]
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: schema-registry }
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka-topics-init }
+      ports: [{ protocol: TCP, port: 9092 }]
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka }
+      ports:
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9093 }
+  egress:
+    # Inter-broker + controller quorum (hiện 1 broker, nhưng để sẵn cho nhiều).
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka }
+      ports:
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9093 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: postgres }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [pricing, order, matching]
+      ports: [{ protocol: TCP, port: 5432 }]
+  egress: []        # database không cần gọi ra ngoài (DNS đã mở ở policy chung)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: redis }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/component: order }
+      ports: [{ protocol: TCP, port: 6379 }]
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: schema-registry
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: schema-registry }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [gateway, pricing, order, matching]
+      ports: [{ protocol: TCP, port: 8081 }]
+  egress:
+    # Schema Registry lưu schema NGAY TRONG Kafka (topic _schemas).
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka }
+      ports: [{ protocol: TCP, port: 9092 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: zipkin
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: zipkin }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [gateway, pricing, order, matching]
+      ports: [{ protocol: TCP, port: 9411 }]
+    # UI Zipkin xem qua Ingress (dev/staging) hoặc port-forward.
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+      ports: [{ protocol: TCP, port: 9411 }]
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-topics-init
+  namespace: trading
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: kafka-topics-init }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka }
+      ports: [{ protocol: TCP, port: 9092 }]

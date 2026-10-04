@@ -1,0 +1,14 @@
+# >>> SỬA CIDR cho đúng subnet của MSK/Strimzi/Confluent <<<
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-kafka-egress
+  namespace: trading
+spec:
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.100.2.0/24
+      ports:
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9094 }

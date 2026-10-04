@@ -1,0 +1,12 @@
+{
+  "type": "record",
+  "name": "TickEventAvro",
+  "namespace": "com.trading.common.avro",
+  "doc": "Wire format cho topic stock.ticks. Schema evolution được Schema Registry cưỡng chế: thêm field mới phải có default, không được xoá/đổi kiểu field cũ (BACKWARD compatibility).",
+  "fields": [
+    { "name": "symbol",    "type": "string" },
+    { "name": "price",     "type": { "type": "bytes", "logicalType": "decimal", "precision": 18, "scale": 4 } },
+    { "name": "volume",    "type": "long" },
+    { "name": "eventTime", "type": "long" }
+  ]
+}

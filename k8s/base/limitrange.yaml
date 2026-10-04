@@ -1,0 +1,28 @@
+# Bảo đảm KHÔNG pod nào lọt vào namespace mà thiếu resource bound, kể cả khi
+# một manifest sau này quên khai báo.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  namespace: trading
+spec:
+  limits:
+    - type: Container
+      default:
+        # Cố ý KHÔNG đặt default CPU limit. CPU limit = CFS throttling: pod cần
+        # burst ngắn (JIT warmup, GC, poll Kafka batch lớn) sẽ bị treo nốt chu kỳ
+        # 100ms -> đội p99 latency. Với hệ giao dịch latency-sensitive đây là
+        # đánh đổi tệ. CPU *request* đã đủ cho scheduler; ResourceQuota chặn tổng.
+        # Memory thì ngược lại: không nén được -> luôn phải cap.
+        memory: 1Gi
+      defaultRequest:
+        cpu: 100m
+        memory: 256Mi
+      max:
+        memory: 4Gi
+      min:
+        cpu: 10m
+        memory: 64Mi
+    - type: PersistentVolumeClaim
+      max: { storage: 200Gi }
+      min: { storage: 1Gi }

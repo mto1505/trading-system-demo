@@ -1,0 +1,101 @@
+# Chạy local: docker compose up -d
+# Kafka (KRaft - không cần Zookeeper), Postgres, Prometheus, Grafana, 3 services
+services:
+  kafka:
+    image: apache/kafka:3.7.0
+    ports: ["9092:9092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:19092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  postgres:
+    image: postgres:16-alpine
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: trading
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: trading123
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.0
+    ports: ["8085:8081"]        # host 8085 (8081 đã dùng cho gateway)
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:19092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    depends_on: [kafka]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  zipkin:
+    image: openzipkin/zipkin:3
+    ports: ["9411:9411"]
+
+  market-gateway:
+    build: { context: ., args: { MODULE: market-gateway } }
+    ports: ["8081:8081"]
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:19092"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
+      SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+    depends_on: [kafka, zipkin, schema-registry]
+
+  pricing-risk-service:
+    build: { context: ., args: { MODULE: pricing-risk-service } }
+    ports: ["8082:8082"]
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:19092"
+      DB_HOST: postgres
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
+      SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+    depends_on: [kafka, postgres, zipkin, schema-registry]
+
+  order-service:
+    build: { context: ., args: { MODULE: order-service } }
+    ports: ["8083:8083"]
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:19092"
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      OUTBOX_RELAY_ENABLED: "true"
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
+    depends_on: [kafka, postgres, redis, zipkin]
+
+  matching-engine:
+    build: { context: ., args: { MODULE: matching-engine } }
+    ports: ["8084:8084"]
+    environment:
+      KAFKA_BOOTSTRAP: "kafka:19092"
+      OUTBOX_RELAY_ENABLED: "true"
+      DB_HOST: postgres
+      ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
+    depends_on: [kafka, postgres, zipkin]
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    ports: ["9090:9090"]
+    volumes: ["./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml"]
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - "./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/ds.yml"
+      - "./monitoring/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/provider.yml"
+      - "./monitoring/dashboards:/var/lib/grafana/dashboards"
+
+volumes:
+  pgdata:

@@ -1,0 +1,180 @@
+# Consumer stock.ticks -> làm giàu -> stock.enriched, kèm REST đọc snapshot.
+# Trần scale = partition / concurrency(3). KEDA (component keda) scale theo
+# LAG chứ không theo CPU - xem components/keda/README trong k8s/README.md.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pricing-risk-service
+  namespace: trading
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pricing-risk-service
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: pricing-risk-service
+    app.kubernetes.io/component: pricing
+    app.kubernetes.io/part-of: trading-system
+spec:
+  selector:
+    app.kubernetes.io/name: pricing-risk-service
+  ports:
+    - { name: http, port: 8082, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pricing-risk-service
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: pricing-risk-service
+    app.kubernetes.io/component: pricing
+    app.kubernetes.io/part-of: trading-system
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  minReadySeconds: 15
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0          # không bao giờ tụt dưới số replica mong muốn
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pricing-risk-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pricing-risk-service
+        app.kubernetes.io/component: pricing
+        app.kubernetes.io/part-of: trading-system
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: pricing-risk-service
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      # Trải pod ra zone trước rồi tới node. Mất một node hoặc một AZ không
+      # được làm đứt consumer group.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: pricing-risk-service }
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: pricing-risk-service }
+      initContainers:
+        # Flyway fail cứng khi DB chưa sẵn sàng -> chặn ở đây thay vì đốt
+        # vòng CrashLoopBackOff (mỗi vòng lại chờ lâu hơn, rollout treo).
+        - name: wait-for-db
+          image: postgres:16.4-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$PGUSER" -t 3; do
+                echo "cho postgres tai $DB_HOST:$DB_PORT"; sleep 2
+              done
+              echo "postgres da nhan ket noi"
+          env:
+            - name: DB_HOST
+              valueFrom: { configMapKeyRef: { name: trading-config, key: DB_HOST } }
+            - name: DB_PORT
+              valueFrom: { configMapKeyRef: { name: trading-config, key: DB_PORT } }
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: trading-secrets, key: DB_USER } }
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits:   { memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 999
+            capabilities: { drop: ["ALL"] }
+      containers:
+        - name: app
+          image: ghcr.io/trading-system/pricing-risk-service:REPLACED_BY_OVERLAY
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8082, protocol: TCP }
+          envFrom:
+            - configMapRef: { name: trading-config }
+          env:
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: trading-secrets, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: trading-secrets, key: DB_PASSWORD } }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          resources:
+            # memory request == limit (không bị evict); CPU không có limit
+            # (không bị CFS throttle làm vọt p99).
+            requests: { cpu: 500m, memory: 1536Mi }
+            limits:   { memory: 1536Mi }
+          startupProbe:
+            # Rộng tay: JVM nguội + Flyway migration có thể mất vài chục giây.
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            # Lỏng hơn readiness có chủ đích: DB ốm thì gỡ pod khỏi Service,
+            # KHÔNG restart hàng loạt pod đang khoẻ.
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          lifecycle:
+            preStop:
+              sleep: { seconds: 5 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 128Mi }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pricing-risk-service
+  namespace: trading
+spec:
+  # Drain node khi nâng cấp cluster không được rút sạch consumer của một group
+  # -> dừng xử lý lệnh giữa phiên giao dịch.
+  #
+  # maxUnavailable (không phải minAvailable): đúng ở MỌI số replica.
+  # minAvailable: 1 với deployment 1 replica sẽ làm `kubectl drain` treo mãi;
+  # còn với 3 replica thì lại cho phép rút tới 2 pod cùng lúc.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pricing-risk-service

@@ -1,0 +1,61 @@
+server:
+  port: 8082
+  tomcat:
+    threads:
+      max: 200          # REST đọc snapshot rất nhẹ -> nhiều thread OK
+
+spring:
+  application:
+    name: pricing-risk-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trading}
+    username: ${DB_USER:trading}
+    password: ${DB_PASSWORD:trading123}
+    hikari:
+      maximum-pool-size: 10      # chỉ scheduler flush + history API dùng DB -> pool nhỏ đủ
+  flyway:
+    enabled: true                # schema do Flyway quản lý, version-control trong Git
+  jpa:
+    hibernate:
+      ddl-auto: validate         # Hibernate CHỈ kiểm tra khớp schema, không được sửa
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 100        # gom 100 INSERT/round-trip khi saveAll
+        order_inserts: true
+    open-in-view: false          # QUAN TRỌNG: tắt OSIV, tránh giữ connection suốt request
+
+schema:
+  registry:
+    url: ${SCHEMA_REGISTRY_URL:http://localhost:8085}
+
+# === DISTRIBUTED TRACING ===
+# Sample 10%: trace 100% luong tick se ton CPU/băng thông đáng kể trên hot path.
+# 10% đủ để thấy hình dạng latency; khi điều tra sự cố có thể tạm nâng lên 1.0.
+management:
+  tracing:
+    sampling:
+      probability: ${TRACING_PROBABILITY:0.1}
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true   # histogram cho latency REST API
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"

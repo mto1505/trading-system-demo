@@ -1,0 +1,30 @@
+# Nền zero-trust: trong namespace này không gì nói chuyện được với gì, trừ khi
+# có policy cho phép tường minh. Đây là biện pháp an ninh giá trị nhất của cả
+# bộ manifest - một pod bị chiếm quyền không tự ý gọi ra ngoài được.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: trading
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# DNS phải mở cho tất cả, nếu không mọi tên service đều không phân giải được.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: trading
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }

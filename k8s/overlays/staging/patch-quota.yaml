@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: namespace-quota
+  namespace: trading
+spec:
+  hard:
+    requests.cpu: "6"
+    requests.memory: 14Gi
+    limits.memory: 20Gi
+    persistentvolumeclaims: "4"
+    requests.storage: 60Gi
+    pods: "30"
+    services.loadbalancers: "1"
+    services.nodeports: "0"

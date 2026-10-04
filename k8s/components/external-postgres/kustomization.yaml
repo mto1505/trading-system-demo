@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Prod thật chạy database NGOÀI cluster (RDS / Cloud SQL / CloudNativePG ở
+# namespace riêng): backup, PITR, failover, patch version là việc của managed
+# service chứ không phải của một StatefulSet 1 replica.
+#
+# Bật component này rồi đặt DB_HOST (và DB_PORT/DB_NAME nếu khác) trong
+# configMapGenerator của overlay.
+resources:
+  - allow-external-db-egress.yaml
+
+patches:
+  - path: delete-sts.yaml
+    target: { kind: StatefulSet, name: postgres }
+  - path: delete-svc.yaml
+    target: { kind: Service, name: postgres }
+  - path: delete-pdb.yaml
+    target: { kind: PodDisruptionBudget, name: postgres }
+  - path: delete-netpol.yaml
+    target: { kind: NetworkPolicy, name: postgres }

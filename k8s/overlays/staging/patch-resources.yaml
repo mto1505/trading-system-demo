@@ -1,0 +1,14 @@
+# Staging dùng đúng tỉ lệ request/limit của prod, chỉ nhỏ hơn về con số -
+# để hồ sơ GC và thời gian khởi động vẫn giống prod ở mức có ý nghĩa.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: set-by-target
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          resources:
+            requests: { cpu: 250m, memory: 1Gi }
+            limits:   { memory: 1Gi }

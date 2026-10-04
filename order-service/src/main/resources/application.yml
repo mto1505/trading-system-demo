@@ -1,0 +1,95 @@
+server:
+  port: 8083
+  shutdown: graceful   # ngung nhan request moi, xu ly not request dang chay
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s   # du cho Kafka listener commit offset cuoi
+  application:
+    name: order-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trading}
+    username: ${DB_USER:trading}
+    password: ${DB_PASSWORD:trading123}
+    hikari:
+      maximum-pool-size: 20        # mỗi lệnh 1 transaction ngắn -> pool vừa phải
+  flyway:
+    enabled: true
+    schemas: ordersvc              # Flyway tự tạo schema + chạy migration trong đó
+    default-schema: ordersvc
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      timeout: 200ms               # Redis chậm KHÔNG được kéo chậm lệnh: timeout ngắn,
+                                   # lỗi thì fallback xuống DB dedupe (degrade gracefully)
+
+outbox:
+  relay:
+    # true = polling relay (mac dinh). Dat false khi dung Debezium CDC,
+    # neu khong hai duong se publish trung.
+    enabled: ${OUTBOX_RELAY_ENABLED:true}
+    interval-ms: 500
+    batch-size: 100
+
+resilience4j:
+  ratelimiter:
+    instances:
+      orders:
+        limit-for-period: 200      # 200 lệnh/giây/pod
+        limit-refresh-period: 1s
+        timeout-duration: 0s       # không xếp hàng chờ - từ chối ngay (fail-fast)
+  circuitbreaker:
+    instances:
+      orders-db:
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50 # >=50% call lỗi -> MỞ breaker
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+
+security:
+  api-key: ${ORDER_API_KEY:demo-key}   # production: lấy từ Secret/Vault, không hardcode
+
+order:
+  max-price-deviation-pct: 5     # chặn lệnh lệch >5% giá tham chiếu
+  max-data-age-ms: 10000         # dữ liệu >10s -> coi như stale, không cho đặt
+
+# === DISTRIBUTED TRACING ===
+# Sample 10%: trace 100% luong tick se ton CPU/băng thông đáng kể trên hot path.
+# 10% đủ để thấy hình dạng latency; khi điều tra sự cố có thể tạm nâng lên 1.0.
+management:
+  tracing:
+    sampling:
+      probability: ${TRACING_PROBABILITY:0.1}
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  health:
+    redis:
+      enabled: false   # Redis là cache phụ - nó chết KHÔNG được làm readiness fail
+                       # (nếu không K8s sẽ rút pod khỏi Service dù pod vẫn phục vụ tốt)
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"

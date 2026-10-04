@@ -1,0 +1,14 @@
+# The default-deny policy blocks egress to anything outside the cluster, so an
+# external database needs an explicit hole - narrowed to the DB subnet only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: taskapp
+  namespace: taskapp
+spec:
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.20.0.0/24      # <- replace with your managed-DB subnet
+      ports:
+        - { protocol: TCP, port: 5432 }

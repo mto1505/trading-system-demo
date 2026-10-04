@@ -1,0 +1,72 @@
+# Zipkin in-memory: đủ cho dev/staging, MẤT trace khi restart.
+# Prod nên trỏ ZIPKIN_ENDPOINT sang Grafana Tempo / Zipkin+Elasticsearch
+# (overlay prod đã làm vậy và không deploy Deployment này).
+apiVersion: v1
+kind: Service
+metadata:
+  name: zipkin
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: zipkin
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/part-of: trading-system
+spec:
+  selector:
+    app.kubernetes.io/name: zipkin
+  ports:
+    - { name: http, port: 9411, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zipkin
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: zipkin
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/part-of: trading-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zipkin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zipkin
+        app.kubernetes.io/component: tracing
+        app.kubernetes.io/part-of: trading-system
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: zipkin
+          image: openzipkin/zipkin:3.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 9411 }
+          env:
+            - name: JAVA_OPTS
+              value: "-XX:MaxRAMPercentage=70"
+            - name: STORAGE_TYPE
+              value: mem
+            - name: MEM_MAX_SPANS
+              value: "200000"
+          resources:
+            requests: { cpu: 100m, memory: 768Mi }
+            limits:   { memory: 1Gi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }

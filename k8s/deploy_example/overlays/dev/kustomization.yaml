@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Same manifests as production, only the knobs differ. That is the whole point:
+# what you test in dev is structurally identical to what ships.
+namespace: taskapp-dev
+nameSuffix: ""
+
+resources:
+  - ../../base
+
+images:
+  - name: ghcr.io/example/k8s-practice
+    newName: k8s-practice
+    newTag: dev
+
+replicas:
+  - name: taskapp
+    count: 1
+
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    literals:
+      - APP_ENV=dev
+      - APP_MESSAGE=Task API (dev)
+      - LOG_LEVEL_APP=DEBUG
+      - DB_POOL_MAX=5
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres.taskapp-dev.svc.cluster.local:5432/taskdb?currentSchema=app&ApplicationName=taskapp&connectTimeout=3&socketTimeout=30
+
+secretGenerator:
+  - name: db-credentials
+    envs:
+      - secrets.env          # gitignored; copy secrets.env.example and fill in
+
+generatorOptions:
+  disableNameSuffixHash: false   # config change -> new hash -> automatic rollout
+
+patches:
+  - path: patch-dev-resources.yaml
+  - path: patch-dev-ingress.yaml
+  - path: patch-dev-hpa.yaml
+  - path: patch-dev-quota.yaml

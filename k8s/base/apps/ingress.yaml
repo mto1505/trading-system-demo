@@ -1,0 +1,45 @@
+# Một Ingress, định tuyến theo path tới đúng service. Host và TLS do overlay
+# đặt - base cố tình để placeholder để không ai apply nhầm lên domain thật.
+#
+# KHÔNG dùng annotation `configuration-snippet`: ingress-nginx >= 1.9 chặn mặc
+# định vì nó cho phép bất kỳ ai tạo được Ingress chèn config nginx tuỳ ý.
+# Security header do ứng dụng tự đặt.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trading
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: trading
+    app.kubernetes.io/part-of: trading-system
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "5"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: trading.example.com
+      http:
+        paths:
+          # Đặt lệnh - đường vào chính, có API key + rate limit ở tầng ứng dụng.
+          - path: /api/v1/orders
+            pathType: Prefix
+            backend:
+              service: { name: order-service, port: { name: http } }
+          # Đọc snapshot giá.
+          - path: /api/v1/marketdata
+            pathType: Prefix
+            backend:
+              service: { name: pricing-risk-service, port: { name: http } }
+          # Tra cứu khớp lệnh.
+          - path: /api/v1/executions
+            pathType: Prefix
+            backend:
+              service: { name: matching-engine, port: { name: http } }
+          # Bơm tick thủ công - CÔNG CỤ DEV. Overlay prod gỡ path này đi.
+          - path: /api/v1/ticks
+            pathType: Prefix
+            backend:
+              service: { name: market-gateway, port: { name: http } }

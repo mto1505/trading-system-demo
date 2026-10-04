@@ -1,0 +1,76 @@
+# Quy tắc cho 4 service Java. Chọn pod theo label `component` thay vì liệt kê
+# từng tên: thêm service mới cùng component là tự động được áp dụng.
+#
+# LƯU Ý: probe của kubelet xuất phát từ NODE, không đi qua NetworkPolicy, nên
+# liveness/readiness vẫn chạy dù không có rule ingress nào cho chúng.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trading-apps-egress
+  namespace: trading
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [gateway, pricing, order, matching]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka }
+      ports: [{ protocol: TCP, port: 9092 }]
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: postgres }
+      ports: [{ protocol: TCP, port: 5432 }]
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: redis }
+      ports: [{ protocol: TCP, port: 6379 }]
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: schema-registry }
+      ports: [{ protocol: TCP, port: 8081 }]
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: zipkin }
+      ports: [{ protocol: TCP, port: 9411 }]
+---
+# Traffic vào: chỉ Ingress controller (và chỉ tới order-service) + hệ monitoring.
+# Không có rule nào cho service-gọi-service vì thiết kế không có: 4 service
+# chỉ nói chuyện qua Kafka.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trading-apps-ingress
+  namespace: trading
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [gateway, pricing, order, matching]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+      ports:
+        - { protocol: TCP, port: 8081 }
+        - { protocol: TCP, port: 8082 }
+        - { protocol: TCP, port: 8083 }
+        - { protocol: TCP, port: 8084 }
+    # Prometheus/Grafana scrape /actuator/prometheus. Hai nguồn: stack ngoài
+    # (namespace monitoring) và Prometheus tối giản trong namespace (component
+    # in-cluster-prometheus, dùng ở dev).
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: prometheus }
+      ports:
+        - { protocol: TCP, port: 8081 }
+        - { protocol: TCP, port: 8082 }
+        - { protocol: TCP, port: 8083 }
+        - { protocol: TCP, port: 8084 }

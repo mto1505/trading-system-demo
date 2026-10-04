@@ -1,0 +1,13 @@
+# >>> SỬA CIDR cho đúng subnet của RDS/Cloud SQL <<<
+# Giữ hẹp: pod bị chiếm quyền chỉ với tới đúng database, không quét được VPC.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-db-egress
+  namespace: trading
+spec:
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.100.1.0/24
+      ports: [{ protocol: TCP, port: 5432 }]

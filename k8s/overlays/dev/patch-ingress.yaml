@@ -1,0 +1,29 @@
+# Dev: HTTP thuần, host trỏ vào /etc/hosts hoặc nip.io. Không cert-manager.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trading
+  namespace: trading        # khop voi base; namespace transformer cua overlay chay SAU patch
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+    - host: trading.dev.local
+      http:
+        paths:
+          - path: /api/v1/orders
+            pathType: Prefix
+            backend:
+              service: { name: order-service, port: { name: http } }
+          - path: /api/v1/marketdata
+            pathType: Prefix
+            backend:
+              service: { name: pricing-risk-service, port: { name: http } }
+          - path: /api/v1/executions
+            pathType: Prefix
+            backend:
+              service: { name: matching-engine, port: { name: http } }
+          - path: /api/v1/ticks
+            pathType: Prefix
+            backend:
+              service: { name: market-gateway, port: { name: http } }

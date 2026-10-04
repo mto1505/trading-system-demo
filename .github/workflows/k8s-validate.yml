@@ -1,0 +1,80 @@
+# Build cả ba overlay trên mỗi PR. Một patch sai `target`, một file bị đổi tên,
+# một tham chiếu ConfigMap gãy - tất cả hỏng ở đây chứ không hỏng ở cluster.
+name: k8s-validate
+
+on:
+  pull_request:
+    paths: ["k8s/**", ".github/workflows/k8s-validate.yml"]
+  push:
+    branches: [main]
+    paths: ["k8s/**"]
+
+jobs:
+  kustomize-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        overlay: [dev, staging, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cai kustomize
+        run: |
+          curl -sSL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      # secrets.env bi gitignore nen CI khong co -> tao ban gia de build chay duoc.
+      # Gia tri khong quan trong: ta chi kiem tra manifest hop le.
+      - name: Tao secrets.env gia
+        if: matrix.overlay != 'prod'
+        run: |
+          cp k8s/overlays/${{ matrix.overlay }}/secrets.env.example \
+             k8s/overlays/${{ matrix.overlay }}/secrets.env
+          sed -i 's/^\(DB_PASSWORD\|ORDER_API_KEY\)=$/\1=ci-placeholder/' \
+             k8s/overlays/${{ matrix.overlay }}/secrets.env
+
+      - name: kustomize build
+        run: kustomize build k8s/overlays/${{ matrix.overlay }} > /tmp/${{ matrix.overlay }}.yaml
+
+      # kubeconform kiem tra schema. CRD cua KEDA/Prometheus Operator/ESO/cert-manager
+      # khong co trong schema chuan -> lay tu catalog cua datreeio.
+      - name: Kiem tra schema
+        run: |
+          curl -sSL -o kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform.tar.gz kubeconform && sudo mv kubeconform /usr/local/bin/
+          kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /tmp/${{ matrix.overlay }}.yaml
+
+      - name: Prod phai ghim image theo digest
+        if: matrix.overlay == 'prod'
+        run: |
+          # Tag la mutable: cung manifest, ngay mai ra bits khac. Chan tu CI.
+          # Dang digest cung chua dau ':' (@sha256:...) nen phai loai rieng.
+          if grep -E '^\s+image: ghcr\.io/' /tmp/prod.yaml | grep -v '@sha256:'; then
+            echo "::error::overlay prod dang dung TAG, phai dung @sha256:"
+            exit 1
+          fi
+          echo "ok - moi image ung dung deu ghim theo digest"
+
+      # DEEP-DIVE.md #14: `maxReplicaCount` phai khop `partition / concurrency(3)`
+      # nhung hai con so nam o hai file khac nhau, khong gi cuong che. Cuong che o day.
+      - name: KEDA maxReplicaCount khong vuot partition/3
+        run: |
+          P=$(grep -E '^\s+KAFKA_PARTITIONS:' /tmp/${{ matrix.overlay }}.yaml \
+               | head -1 | tr -d ' "' | cut -d: -f2)
+          if [ -z "$P" ]; then echo "::error::khong tim thay KAFKA_PARTITIONS"; exit 1; fi
+          CEILING=$((P / 3))
+          echo "overlay=${{ matrix.overlay }} partitions=$P -> tran pod consumer=$CEILING"
+          FAIL=0
+          for M in $(grep -E '^\s+maxReplicaCount:' /tmp/${{ matrix.overlay }}.yaml \
+                      | tr -d ' ' | cut -d: -f2); do
+            if [ "$M" -gt "$CEILING" ]; then
+              echo "::error::maxReplicaCount=$M vuot tran $CEILING (= $P partition / concurrency 3)"
+              FAIL=1
+            fi
+          done
+          exit $FAIL

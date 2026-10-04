@@ -1,0 +1,35 @@
+# Maven build output
+target/
+*.class
+*.jar
+*.war
+
+# Secrets — never commit (see secrets.env.example for the template)
+secrets.env
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Logs
+*.log
+logs/

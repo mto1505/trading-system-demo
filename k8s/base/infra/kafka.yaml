@@ -1,0 +1,148 @@
+# Kafka KRaft 1 broker (không cần Zookeeper), có PVC để KHÔNG mất offset khi
+# pod restart - đây là khác biệt quan trọng so với bản demo ephemeral cũ:
+# mất __consumer_offsets nghĩa là consumer replay lại từ đầu hoặc nhảy tới cuối,
+# cả hai đều sai với luồng lệnh.
+#
+# PROD: KHÔNG dùng file này. Bật component `external-kafka` và trỏ sang
+# Strimzi Operator (k8s/cluster/strimzi-kafka.yaml) hoặc MSK/Confluent Cloud.
+# Tự viết StatefulSet multi-broker = tự gánh rolling upgrade, rack-awareness,
+# reassign partition - việc của Operator.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: broker
+    app.kubernetes.io/part-of: trading-system
+spec:
+  clusterIP: None           # headless: client nối thẳng kafka-0.kafka...
+  selector:
+    app.kubernetes.io/name: kafka
+  ports:
+    - { name: broker, port: 9092, targetPort: broker }
+    - { name: controller, port: 9093, targetPort: controller }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: broker
+    app.kubernetes.io/part-of: trading-system
+spec:
+  serviceName: kafka
+  replicas: 1
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/component: broker
+        app.kubernetes.io/part-of: trading-system
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000          # uid `appuser` trong image apache/kafka
+        runAsGroup: 1000
+        fsGroup: 1000            # để pod ghi được vào PVC
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: kafka
+          image: apache/kafka:3.7.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: broker, containerPort: 9092 }
+            - { name: controller, containerPort: 9093 }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            # pod-index label (GA từ k8s 1.28) cho node id khớp ordinal của pod.
+            - name: KAFKA_NODE_ID
+              valueFrom:
+                fieldRef: { fieldPath: "metadata.labels['apps.kubernetes.io/pod-index']" }
+            # Cluster id cố định -> format lại PVC cũ không sinh cluster mới.
+            - name: CLUSTER_ID
+              value: "5L6g3nShT-eMCtK--X86sw"
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "0@kafka-0.kafka.$(POD_NAMESPACE).svc.cluster.local:9093"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://$(POD_NAME).kafka.$(POD_NAMESPACE).svc.cluster.local:9092"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: PLAINTEXT
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data
+            # Topic do Job `kafka-topics-init` tạo với số partition tường minh.
+            # Auto-create sẽ đẻ topic 1 partition -> phá vỡ toàn bộ bài toán
+            # scale consumer (partition/concurrency), nên tắt hẳn.
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "false"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_LOG_RETENTION_HOURS
+              value: "72"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms512m -Xmx1g"
+          resources:
+            requests: { cpu: 500m, memory: 1536Mi }
+            limits:   { memory: 2Gi }
+          startupProbe:
+            tcpSocket: { port: broker }
+            periodSeconds: 5
+            failureThreshold: 36        # tới 3 phút cho lần format storage đầu
+          readinessProbe:
+            tcpSocket: { port: broker }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket: { port: broker }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/kafka }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 64Mi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 10Gi } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kafka
+  namespace: trading
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka

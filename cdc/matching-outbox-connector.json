@@ -1,0 +1,29 @@
+{
+  "name": "matching-outbox-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "trading",
+    "database.password": "trading123",
+    "database.dbname": "trading",
+    "topic.prefix": "cdc-matching",
+    "slot.name": "matching_outbox_slot",
+    "plugin.name": "pgoutput",
+    "table.include.list": "matchsvc.outbox_event",
+
+    "//": "Outbox Event Router: biến 1 row outbox thành 1 message đúng topic/key,",
+    "// ": "payload gửi đi là NGUYÊN VĂN cột payload - consumer không thấy khác gì so với relay",
+    "transforms": "outbox",
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+    "transforms.outbox.table.field.event.id": "id",
+    "transforms.outbox.table.field.event.key": "msg_key",
+    "transforms.outbox.table.field.event.payload": "payload",
+    "transforms.outbox.route.by.field": "topic",
+    "transforms.outbox.route.topic.replacement": "${routedByValue}",
+    "transforms.outbox.table.expand.json.payload": "false",
+
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.storage.StringConverter"
+  }
+}

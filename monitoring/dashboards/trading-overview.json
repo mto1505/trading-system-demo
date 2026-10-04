@@ -1,0 +1,212 @@
+{
+  "title": "Trading System Overview",
+  "uid": "trading-overview",
+  "schemaVersion": 39,
+  "refresh": "10s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "E2E Latency tick->calc (p50/p95/p99)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "pricing_e2e_latency_seconds{quantile=\"0.5\"}",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "pricing_e2e_latency_seconds{quantile=\"0.95\"}",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "pricing_e2e_latency_seconds{quantile=\"0.99\"}",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Tick throughput (msg/s)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "rate(gateway_ticks_sent_total[1m])",
+          "legendFormat": "ticks sent"
+        },
+        {
+          "expr": "rate(gateway_ticks_error_total[1m])",
+          "legendFormat": "ticks error"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Orders: accepted / rejected / duplicate",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "rate(orders_accepted_total[1m])",
+          "legendFormat": "accepted/s"
+        },
+        {
+          "expr": "rate(orders_rejected_total[1m])",
+          "legendFormat": "rejected/s"
+        },
+        {
+          "expr": "rate(orders_duplicate_total[1m])",
+          "legendFormat": "duplicate/s"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Outbox & Matching",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "rate(outbox_published_total[1m])",
+          "legendFormat": "outbox published/s"
+        },
+        {
+          "expr": "rate(outbox_publish_failed_total[1m])",
+          "legendFormat": "outbox failed/s"
+        },
+        {
+          "expr": "rate(matching_executed_total[1m])",
+          "legendFormat": "executions/s"
+        },
+        {
+          "expr": "rate(matching_duplicate_skipped_total[1m])",
+          "legendFormat": "dup skipped/s"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "HTTP p99 theo service",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[1m])) by (le, application))",
+          "legendFormat": "{{application}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "JVM heap used theo service",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(jvm_memory_used_bytes{area=\"heap\"}) by (application)",
+          "legendFormat": "{{application}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Saga: vòng đời lệnh",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "description": "accepted phải bằng filled + rejected_by_matching sau độ trễ ngắn. Chênh lệch kéo dài = lệnh treo, saga đứt ở chiều về.",
+      "targets": [
+        {
+          "expr": "rate(orders_accepted_total[1m])",
+          "legendFormat": "accepted/s"
+        },
+        {
+          "expr": "rate(orders_filled_total[1m])",
+          "legendFormat": "filled/s"
+        },
+        {
+          "expr": "rate(orders_rejected_by_matching_total[1m])",
+          "legendFormat": "rejected by matching/s"
+        },
+        {
+          "expr": "rate(orders_report_ignored_total[1m])",
+          "legendFormat": "report ignored/s"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Lệnh treo (accepted chưa có phản hồi khớp)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "description": "Cộng dồn accepted trừ đi (filled + rejected). Khác 0 kéo dài là sự cố nghiêm trọng: khách bị giữ tiền cho lệnh không bao giờ kết thúc.",
+      "targets": [
+        {
+          "expr": "orders_accepted_total - (orders_filled_total + orders_rejected_by_matching_total)",
+          "legendFormat": "pending"
+        }
+      ]
+    }
+  ]
+}

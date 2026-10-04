@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: namespace-quota
+  namespace: trading
+spec:
+  hard:
+    requests.cpu: "16"
+    requests.memory: 32Gi
+    limits.memory: 48Gi
+    # Prod dùng DB/Kafka ngoài cluster -> gần như không cần PVC trong namespace.
+    persistentvolumeclaims: "2"
+    requests.storage: 20Gi
+    pods: "60"
+    services.loadbalancers: "1"
+    services.nodeports: "0"

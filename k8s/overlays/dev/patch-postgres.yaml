@@ -1,0 +1,19 @@
+# Postgres dev: pool của các service nhỏ lại theo replicas=1 nên 100 connection
+# mặc định là thừa; vẫn giữ 200 để không phải nhớ hai cấu hình khác nhau.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: set-by-target   # bi `target` trong kustomization ghi de
+spec:
+  template:
+    spec:
+      containers:
+        - name: postgres
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits:   { memory: 512Mi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 3Gi } }

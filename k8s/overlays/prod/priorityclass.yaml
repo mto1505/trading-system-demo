@@ -1,0 +1,10 @@
+# Khi node thiếu chỗ, kube-scheduler phải biết cái gì được hy sinh trước.
+# Luồng lệnh của sàn không bao giờ là thứ bị preempt để nhường cho một job batch.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: trading-critical
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "Luong giao dich - uu tien cao nhat trong cluster"

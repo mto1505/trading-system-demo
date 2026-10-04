@@ -1,0 +1,45 @@
+# Gắn vào Prometheus (rule_files) hoặc chuyển sang Alertmanager
+groups:
+  - name: trading-alerts
+    rules:
+      # Latency end-to-end p99 > 500ms trong 2 phút -> cảnh báo
+      - alert: HighE2ELatency
+        expr: histogram_quantile(0.99, rate(pricing_e2e_latency_seconds_bucket[1m])) > 0.5
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "P99 latency tick->calc vuot 500ms"
+
+      # Consumer lag tang (can kafka_exporter trong production)
+      - alert: OrderRejectSpike
+        expr: rate(orders_rejected_total[5m]) > 10
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Ty le tu choi lenh tang bat thuong"
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 30s
+        labels: { severity: critical }
+        annotations:
+          summary: "Service {{ $labels.instance }} khong phan hoi"
+
+      # Saga đứt chiều về: lệnh ACCEPTED mãi không nhận được execution report.
+      # Đây là cảnh báo nghiêm trọng nhất trong hệ - nghĩa là khách bị giữ tiền
+      # cho một lệnh không bao giờ kết thúc.
+      - alert: SagaStuckOrders
+        expr: (orders_accepted_total - (orders_filled_total + orders_rejected_by_matching_total)) > 10
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Co lenh ACCEPTED khong nhan duoc execution report"
+          description: "Kiem tra: outbox_publish_failed_total, matching-engine con song khong, consumer lag topic stock.orders/stock.executions"
+
+      # Outbox tắc: event ghi vào nhưng không ra được Kafka
+      - alert: OutboxPublishFailing
+        expr: rate(outbox_publish_failed_total[5m]) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "OutboxRelay dang that bai khi publish"

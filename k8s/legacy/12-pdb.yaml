@@ -1,0 +1,32 @@
+# PodDisruptionBudget: khi node được drain (nâng cấp cluster), K8s không được
+# rút quá nhiều pod cùng lúc. Không có PDB, một lệnh drain có thể xoá sạch
+# consumer của một group -> dừng xử lý lệnh giữa phiên giao dịch.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: order-service-pdb
+  namespace: trading
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: order-service }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: matching-engine-pdb
+  namespace: trading
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: matching-engine }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pricing-risk-pdb
+  namespace: trading
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: pricing-risk-service }

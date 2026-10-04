@@ -1,0 +1,23 @@
+# Trần cao hơn dev/staging vì pod prod được cấp nhiều hơn. Vẫn KHÔNG đặt
+# default CPU limit - lý do chống CFS throttling ở base/limitrange.yaml.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  namespace: trading
+spec:
+  limits:
+    - type: Container
+      default:
+        memory: 1536Mi
+      defaultRequest:
+        cpu: 250m
+        memory: 512Mi
+      max:
+        memory: 8Gi
+      min:
+        cpu: 10m
+        memory: 64Mi
+    - type: PersistentVolumeClaim
+      max: { storage: 200Gi }
+      min: { storage: 1Gi }

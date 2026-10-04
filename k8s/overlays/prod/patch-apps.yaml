@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: set-by-target
+spec:
+  template:
+    spec:
+      priorityClassName: trading-critical
+      containers:
+        - name: app
+          # Digest-pinned nên cache image là an toàn tuyệt đối: cùng digest
+          # thì luôn là cùng bits.
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests: { cpu: 500m, memory: 1536Mi }
+            limits:   { memory: 1536Mi }

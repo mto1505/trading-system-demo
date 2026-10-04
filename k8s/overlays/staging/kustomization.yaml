@@ -1,0 +1,70 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Staging = bản tổng duyệt của prod: cùng component, cùng hình dạng autoscale,
+# cùng TLS. Khác ở quy mô và ở chỗ dùng infra trong cluster cho rẻ.
+namespace: trading-staging
+
+resources:
+  - ../../base
+
+components:
+  # Staging PHẢI bật KEDA để thấy hành vi scale theo lag trước khi lên prod.
+  # Yêu cầu: helm install keda kedacore/keda -n keda --create-namespace
+  - ../../components/keda
+  # Yêu cầu kube-prometheus-stack trong cluster. Chưa có thì đổi sang
+  # ../../components/in-cluster-prometheus
+  - ../../components/monitoring
+
+images:
+  # Staging bám tag DI ĐỘNG (mọi commit vào main). Prod thì không bao giờ.
+  - name: ghcr.io/trading-system/market-gateway
+    newTag: main
+  - name: ghcr.io/trading-system/pricing-risk-service
+    newTag: main
+  - name: ghcr.io/trading-system/order-service
+    newTag: main
+  - name: ghcr.io/trading-system/matching-engine
+    newTag: main
+
+replicas:
+  - { name: market-gateway, count: 1 }        # 1 feed session - xem chú thích ở base
+  # pricing/matching do KEDA quản: giữ bằng minReplicaCount để mỗi lần
+  # `kubectl apply` không kéo ngược số replica mà KEDA vừa đặt.
+  - { name: pricing-risk-service, count: 1 }
+  - { name: matching-engine, count: 1 }
+  - { name: order-service, count: 2 }         # cửa ngõ REST -> luôn >= 2
+
+configMapGenerator:
+  - name: trading-config
+    behavior: merge
+    literals:
+      - KAFKA_BOOTSTRAP=kafka-0.kafka.trading-staging.svc.cluster.local:9092
+      # 6 partition / concurrency 3 = trần 2 pod consumer, khớp maxReplicaCount.
+      - KAFKA_PARTITIONS=6
+      - KAFKA_TOPIC_REPLICAS=1
+      - TRACING_PROBABILITY=0.3
+      - SIMULATED_FEED=true          # staging vẫn dùng feed giả
+      - OUTBOX_RELAY_ENABLED=true
+      - LOGGING_LEVEL_COM_TRADING=INFO
+
+secretGenerator:
+  - name: trading-secrets
+    envs:
+      - secrets.env    # CỐ Ý không có trong repo: thiếu thì build FAIL ngay,
+                       # tốt hơn là deploy âm thầm với một mật khẩu placeholder.
+                       # cp secrets.env.example secrets.env rồi điền.
+
+generatorOptions:
+  disableNameSuffixHash: false
+
+patches:
+  - path: patch-resources.yaml
+    target:
+      kind: Deployment
+      name: "pricing-risk-service|order-service|matching-engine"
+  - path: patch-ingress.yaml
+  - path: patch-quota.yaml
+  # KEDA: trần 2 pod vì chỉ có 6 partition.
+  - path: patch-keda.yaml
+    target: { group: keda.sh, kind: ScaledObject, name: "pricing-risk-service|matching-engine" }

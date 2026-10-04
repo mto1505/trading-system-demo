@@ -1,0 +1,140 @@
+# Postgres 1 instance dùng chung cho 3 service, tách bằng schema:
+#   public   -> pricing-risk-service   (Flyway mặc định)
+#   ordersvc -> order-service          (spring.flyway.schemas)
+#   matchsvc -> matching-engine
+# Flyway tự tạo schema, nên không cần init script.
+#
+# PROD: 1 instance là SPOF. Bật component `external-postgres` để trỏ sang
+# RDS/Cloud SQL (hoặc CloudNativePG trong cluster). Giữ StatefulSet này cho
+# dev/staging thì chi phí thấp mà vẫn giống hình dạng prod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: trading-system
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: trading-system
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: trading-system
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999           # uid `postgres` trong image chính thức
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: postgres
+          image: postgres:16.4-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            # max_connections: TỔNG pool của các service phải lọt vào đây.
+            #   order-service   pool 20 x 3 pod = 60
+            #   pricing-risk    pool 10 x 4 pod = 40
+            #   matching-engine pool 10 x 4 pod = 40
+            # = 140 + superuser reserved -> mặc định 100 là THIẾU ở prod.
+            - -c
+            - max_connections=200
+            - -c
+            - shared_buffers=256MB
+            # wal_level=logical: bật sẵn để chuyển sang Debezium CDC (thay cho
+            # polling outbox relay) KHÔNG cần restart database về sau. Đổi
+            # wal_level là thao tác phải restart, nên trả giá WAL nhỏ ngay từ đầu.
+            - -c
+            - wal_level=logical
+            - -c
+            - max_wal_senders=10
+            - -c
+            - max_replication_slots=10
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          env:
+            # PVC mount ở /var/lib/postgresql/data nhưng PGDATA nằm trong
+            # thư mục con: tránh initdb báo lỗi vì lost+found của một số CSI.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_DB
+              value: trading
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: trading-secrets, key: DB_USER } }
+            # ⚠️ BẪY: POSTGRES_PASSWORD chỉ có tác dụng ĐÚNG MỘT LẦN, lúc initdb
+            # tạo cluster dữ liệu. Lần khởi động sau PGDATA đã tồn tại -> biến này
+            # bị BỎ QUA. Đổi mật khẩu trong secrets.env sẽ: (1) đổi hash Secret,
+            # (2) rolling restart cả StatefulSet này lẫn 3 service, (3) service
+            # dùng mật khẩu MỚI trong khi DB vẫn giữ mật khẩu CŨ -> sập cả môi
+            # trường. Phải ALTER ROLE trong DB TRƯỚC, rồi mới sửa secrets.env.
+            # Xem DEEP-DIVE.md mục 10.3.
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: trading-secrets, key: DB_PASSWORD } }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits:   { memory: 2Gi }
+          startupProbe:
+            exec: { command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d trading"] }
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            exec: { command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d trading"] }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket: { port: postgres }
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 64Mi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 10Gi } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres
+  namespace: trading
+spec:
+  maxUnavailable: 1      # 1 replica -> vẫn cho drain node, chỉ chặn drain song song
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres

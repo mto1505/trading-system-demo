@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskapp
+  namespace: taskapp
+spec:
+  template:
+    spec:
+      priorityClassName: taskapp-critical
+      initContainers:
+        - name: wait-for-db
+          env:
+            - name: DB_HOST
+              value: postgres.taskapp-prod.svc.cluster.local
+      containers:
+        - name: app
+          imagePullPolicy: IfNotPresent   # digest-pinned, so caching is safe
+          resources:
+            requests: { cpu: 500m, memory: 1536Mi }
+            limits:   { memory: 1536Mi }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: taskapp
+  namespace: taskapp
+spec:
+  # With 4 replicas this keeps 3 serving during a node drain.
+  maxUnavailable: 1

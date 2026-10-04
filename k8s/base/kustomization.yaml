@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: trading
+
+resources:
+  # --- nền namespace ---
+  - namespace.yaml
+  - limitrange.yaml
+  - resourcequota.yaml
+  - networkpolicy-default-deny.yaml
+  # --- hạ tầng ---
+  - infra/postgres.yaml
+  - infra/kafka.yaml
+  - infra/kafka-topics-job.yaml
+  - infra/redis.yaml
+  - infra/schema-registry.yaml
+  - infra/zipkin.yaml
+  - infra/infra-networkpolicy.yaml
+  # --- 4 service nghiệp vụ ---
+  - apps/market-gateway.yaml
+  - apps/pricing-risk-service.yaml
+  - apps/order-service.yaml
+  - apps/matching-engine.yaml
+  - apps/apps-networkpolicy.yaml
+  - apps/ingress.yaml
+
+configMapGenerator:
+  # Sinh ra thay vì khai báo tĩnh: mỗi lần đổi config là tên ConfigMap đổi hash
+  # -> Deployment đổi -> rolling restart tự động. ConfigMap tĩnh thì pod cứ chạy
+  # với giá trị cũ cho tới khi có người restart tay.
+  - name: trading-config
+    envs:
+      - config/trading.env
+
+generatorOptions:
+  disableNameSuffixHash: false
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: trading-system
+      app.kubernetes.io/managed-by: kustomize

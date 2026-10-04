@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskapp
+  namespace: taskapp        # matches the base; the overlay's namespace transformer runs after patching
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: wait-for-db
+          env:
+            - name: DB_HOST
+              value: postgres.taskapp-dev.svc.cluster.local
+      containers:
+        - name: app
+          imagePullPolicy: Never      # image is side-loaded with `minikube image load`
+          resources:
+            # 768Mi is the floor for this JVM: below it, heap + metaspace + code
+            # cache no longer fit and the container is OOM-killed mid-startup.
+            requests: { cpu: 100m, memory: 768Mi }
+            limits:   { memory: 768Mi }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: taskapp
+spec:
+  template:
+    spec:
+      containers:
+        - name: postgres
+          args:
+            - -c
+            - max_connections=50
+            - -c
+            - shared_buffers=128MB
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits:   { memory: 512Mi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 2Gi
+---
+# The base backup volume is 20Gi, which on its own consumes the entire dev
+# storage quota and leaves nothing for the database volume itself.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backups
+  namespace: taskapp
+spec:
+  resources:
+    requests:
+      storage: 2Gi

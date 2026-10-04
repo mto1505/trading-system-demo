@@ -1,0 +1,45 @@
+# KEDA thay cho HPA-theo-CPU, vì với Kafka consumer CPU là tín hiệu SAI ở cả
+# hai chiều:
+#   - nghẽn I/O (chờ DB, chờ downstream ack): CPU thấp, lag hàng triệu
+#     -> HPA ngồi yên trong khi hệ đang tụt hậu nghiêm trọng.
+#   - GC nặng hoặc REST traffic cao: CPU cao, lag bằng 0 -> HPA scale vô ích.
+# KEDA query thẳng Kafka: end offset của partition trừ committed offset của
+# consumer group = lag. Đó đúng là đại lượng cần phản ứng.
+#
+# maxReplicaCount KHÔNG được vượt partition / concurrency(3) - xem
+# `setConcurrency(3)` trong pricing/config/KafkaConfig.java. Prod dùng
+# 12 partition -> 4. Pod thứ 5 join group và nhận về KHÔNG partition nào.
+# Muốn scale cao hơn phải TĂNG PARTITION trước (Job kafka-topics-init).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: pricing-risk-service
+  namespace: trading
+spec:
+  scaleTargetRef:
+    name: pricing-risk-service
+  minReplicaCount: 2
+  maxReplicaCount: 4
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # ĐÂY mới là thứ chống flapping. `cooldownPeriod` của KEDA CHỈ áp cho
+          # trường hợp co về 0 replica, mà min ở đây là 2 nên nó vô tác dụng.
+          stabilizationWindowSeconds: 300
+  triggers:
+    - type: kafka
+      metadata:
+        # Đọc từ env của chính Deployment đích (qua envFrom trading-config),
+        # nên không phải nhắc lại địa chỉ Kafka ở đây - một nguồn sự thật.
+        bootstrapServersFromEnv: KAFKA_BOOTSTRAP
+        consumerGroup: pricing-risk-group
+        topic: stock.ticks
+        # NGỮ NGHĨA: lagThreshold là lag TRÊN MỖI REPLICA, không phải mỗi
+        # partition. KEDA tính desiredReplicas = ceil(tổng_lag / lagThreshold).
+        # 1000 ở đây nghĩa là: tổng lag 4000 -> 4 pod.
+        lagThreshold: "1000"
+        # CHỈ có tác dụng cho ngưỡng kích hoạt 0 -> 1. Với minReplicaCount >= 1
+        # giá trị này không bao giờ được dùng tới; giữ lại để nếu sau này đổi
+        # sang scale-to-zero thì đã có sẵn con số đúng.
+        activationLagThreshold: "100"

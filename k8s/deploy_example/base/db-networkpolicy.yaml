@@ -1,0 +1,44 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  namespace: taskapp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/component: database
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Only the API pods and the backup job may reach 5432. Nothing else in the
+    # cluster can even open a socket to the database.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: taskapp
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres-backup
+      ports:
+        - { protocol: TCP, port: 5432 }
+  egress: []      # the database initiates no outbound traffic (DNS comes from the shared policy)
+---
+# The default-deny policy also blocks EGRESS from the backup pod, so without this
+# the nightly pg_dump would hang and the CronJob would fail silently every night.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-backup
+  namespace: taskapp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-backup
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - { protocol: TCP, port: 5432 }

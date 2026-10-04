@@ -1,0 +1,23 @@
+# Kafka dev: 1 broker nhỏ, PVC 3Gi.
+# LƯU Ý: volumeClaimTemplates là IMMUTABLE trên StatefulSet đã tồn tại - đổi
+# dung lượng thì phải `kubectl delete sts kafka --cascade=orphan` rồi apply lại.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: set-by-target   # bi `target` trong kustomization ghi de
+spec:
+  template:
+    spec:
+      containers:
+        - name: kafka
+          env:
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms256m -Xmx640m"
+          resources:
+            requests: { cpu: 200m, memory: 1Gi }
+            limits:   { memory: 1Gi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 3Gi } }

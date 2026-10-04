@@ -1,0 +1,91 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: trading-prod
+
+resources:
+  - ../../base
+  - priorityclass.yaml
+  - externalsecret.yaml
+
+components:
+  - ../../components/keda
+  - ../../components/monitoring
+  # Prod KHÔNG chạy Kafka/Postgres bằng StatefulSet 1 replica tự viết.
+  # Hai component này gỡ chúng đi và mở đường ra dịch vụ quản trị bên ngoài.
+  - ../../components/external-kafka
+  - ../../components/external-postgres
+
+images:
+  # Ghim theo DIGEST, không theo tag. Tag là MUTABLE: cùng một manifest ngày mai
+  # có thể roll ra bits khác. Digest làm bản deploy tái lập được và đây chính là
+  # thứ CI ghi đè ở mỗi lần release.
+  - name: ghcr.io/trading-system/market-gateway
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: ghcr.io/trading-system/pricing-risk-service
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: ghcr.io/trading-system/order-service
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  - name: ghcr.io/trading-system/matching-engine
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+replicas:
+  - { name: market-gateway, count: 1 }        # xem cảnh báo scale ở base
+  - { name: pricing-risk-service, count: 2 }  # = minReplicaCount của KEDA
+  - { name: matching-engine, count: 2 }       # = minReplicaCount của KEDA
+  - { name: order-service, count: 3 }
+
+configMapGenerator:
+  - name: trading-config
+    behavior: merge
+    literals:
+      # >>> PHẢI SỬA TRƯỚC KHI DEPLOY <<<
+      - KAFKA_BOOTSTRAP=kafka-bootstrap.trading.internal:9092
+      - DB_HOST=trading-prod.abcdefg.ap-southeast-1.rds.amazonaws.com
+      # 12 partition / concurrency 3 = trần 4 pod consumer, khớp KEDA max.
+      - KAFKA_PARTITIONS=12
+      - KAFKA_TOPIC_REPLICAS=3
+      # Trace 100% luồng tick tốn CPU và băng thông đáng kể trên hot path.
+      # 5% vẫn đủ dựng được hình dạng latency; khi điều tra sự cố tạm nâng lên.
+      - TRACING_PROBABILITY=0.05
+      - SIMULATED_FEED=false           # prod cắm feed thật, không tự sinh tick
+      - OUTBOX_RELAY_ENABLED=true
+      - LOGGING_LEVEL_ROOT=WARN
+      - LOGGING_LEVEL_COM_TRADING=INFO
+
+# CỐ Ý không có secretGenerator. Mật khẩu production không nằm trong git, kể cả
+# dạng mã hoá mà ai đó giải được ở máy cá nhân. Dùng External Secrets Operator
+# (externalsecret.yaml) hoặc Sealed Secrets.
+
+generatorOptions:
+  disableNameSuffixHash: false
+
+patches:
+  - path: patch-apps.yaml
+    target:
+      kind: Deployment
+      name: "market-gateway|pricing-risk-service|order-service|matching-engine"
+  - path: patch-keda.yaml
+    target: { group: keda.sh, kind: ScaledObject, name: "pricing-risk-service|matching-engine" }
+  - path: patch-ingress.yaml
+  - path: patch-quota.yaml
+  - path: patch-limitrange.yaml
+  - path: patch-external-cidr-db.yaml
+  - path: patch-external-cidr-kafka.yaml
+  - path: patch-external-cidr-kafka-platform.yaml
+
+  # Strategic merge sẽ NỐI THÊM vào topologySpreadConstraints chứ không thay
+  # mục zone, để lại hai luật mâu thuẫn trên cùng topologyKey. JSON patch sửa
+  # đúng một trường.
+  #
+  # DoNotSchedule ở prod: thà pod Pending còn hơn dồn cả consumer group vào
+  # một AZ rồi mất sạch khi AZ đó sự cố.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: "pricing-risk-service|order-service|matching-engine"
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/topologySpreadConstraints/0/whenUnsatisfiable
+        value: DoNotSchedule

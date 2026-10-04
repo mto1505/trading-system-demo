@@ -1,0 +1,84 @@
+# Redis chỉ là CACHE idempotency. Thiết kế đã tính: Redis chết thì dedupe vẫn
+# đúng nhờ unique constraint ở DB (order-service cũng tắt redis health indicator
+# để Redis hỏng KHÔNG làm pod rớt khỏi Service). Vì vậy 1 replica, không persist.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: trading-system
+spec:
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - { name: redis, port: 6379, targetPort: redis }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: trading
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: trading-system
+spec:
+  replicas: 1
+  strategy: { type: Recreate }     # cache: không cần surge, tránh 2 pod tranh nhau
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: trading-system
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            # Thuần cache: tắt RDB/AOF (không có gì đáng cứu), và chặn trần
+            # bộ nhớ ngay trong Redis thay vì để kernel OOM-kill cả pod.
+            - redis-server
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --maxmemory
+            - 200mb
+            - --maxmemory-policy
+            - allkeys-lru
+          ports:
+            - { name: redis, containerPort: 6379 }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { memory: 256Mi }
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket: { port: redis }
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          emptyDir: { medium: Memory, sizeLimit: 64Mi }

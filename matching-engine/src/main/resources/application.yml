@@ -1,0 +1,57 @@
+server:
+  port: 8084
+  shutdown: graceful
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  application:
+    name: matching-engine
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trading}
+    username: ${DB_USER:trading}
+    password: ${DB_PASSWORD:trading123}
+  flyway:
+    enabled: true
+    schemas: matchsvc
+    default-schema: matchsvc
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+outbox:
+  relay:
+    enabled: ${OUTBOX_RELAY_ENABLED:true}
+    interval-ms: 500
+
+matching:
+  price-band-pct: 7          # bien do HOSE; HNX 10; phai sinh theo quy dinh VN30
+  lot-size: 100              # co phieu lo chan; phai sinh dat 1
+  session-check-enabled: false   # bat len de tu choi lenh ngoai gio giao dich
+
+# === DISTRIBUTED TRACING ===
+management:
+  tracing:
+    sampling:
+      probability: ${TRACING_PROBABILITY:0.1}
+  zipkin:
+    tracing:
+      endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name:},%X{traceId:-},%X{spanId:-}]"
