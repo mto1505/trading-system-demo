@@ -161,6 +161,24 @@ curl -s -X POST localhost:8083/api/v1/orders \
 > Dữ liệu chỉ "tươi" trong 10 giây (`order.max-data-age-ms`). Nếu để lâu rồi mới
 > đặt lệnh sẽ nhận `NO_FRESH_MARKET_DATA` — bơm lại tick rồi đặt ngay.
 
+> 🔒 **`clientOrderId` chỉ dùng được MỘT lần — kể cả khi lần đó bị TỪ CHỐI.**
+> Nếu `local-1` đã từng nhận `NO_FRESH_MARKET_DATA` (hoặc `RISK_LEVEL_HIGH`,
+> `PRICE_DEVIATION`), lệnh đó đã được ghi vào `ordersvc.orders` với status
+> `REJECTED`. Từ đó mọi lần gửi lại `local-1` sẽ **replay nguyên văn kết quả cũ**,
+> pre-trade check KHÔNG chạy lại — bơm thêm bao nhiêu tick cũng vô ích. Dấu hiệu
+> nhận biết: response trả về `symbol`/`timestamp` của lần gửi ĐẦU TIÊN chứ không
+> phải thứ bạn vừa gửi. Đây là idempotency hoạt động đúng, không phải lỗi.
+>
+> Cách xử lý: **đổi `clientOrderId`** (`local-2`, hoặc `"local-$(date +%s)"`).
+> Chỉ khi thật sự cần giữ lại tên cũ ở máy local mới xoá cả hai lớp dedupe:
+>
+> ```bash
+> MSYS_NO_PATHCONV=1 docker compose exec -T postgres psql -U trading -d trading \
+>   -c "DELETE FROM ordersvc.orders WHERE client_order_id='local-1';"
+> MSYS_NO_PATHCONV=1 docker compose exec -T redis redis-cli --scan --pattern 'idem:*local-1*' \
+>   | xargs -r docker compose exec -T redis redis-cli DEL
+> ```
+
 **3. Idempotency — gửi lại y hệt:**
 ```bash
 # Chạy lại đúng lệnh trên -> trả về KẾT QUẢ CŨ, không tạo lệnh thứ hai
@@ -793,6 +811,7 @@ outbox_publish_failed_total      0.0
 | `FlywayValidateException` / `Schema-validation` | Volume `pgdata` còn schema cũ từ lần chạy trước | `docker compose down -v` rồi `up -d` lại |
 | `GET /api/v1/marketdata/HPG` trả rỗng | Feed chưa bơm đủ tick, hoặc pricing chưa join consumer group | Chờ 15–30 giây; kiểm tra `docker compose logs market-gateway pricing-risk-service` |
 | Đặt lệnh trả **422 `NO_FRESH_MARKET_DATA`** | Cache enriched rỗng hoặc dữ liệu cũ hơn 10 s (`max-data-age-ms`) | Xác nhận gateway + pricing đang chạy, chờ tick mới |
+| Đã bơm tick, `/marketdata/<symbol>` trả `LOW`, nhưng lệnh **vẫn** 422 `NO_FRESH_MARKET_DATA` | `clientOrderId` đó đã bị từ chối ở lần gửi trước → đang replay kết quả cũ, pre-trade check không chạy lại. Nhận biết: response trả `symbol`/`timestamp` của lần đầu | Đổi `clientOrderId` mới. Kiểm tra: `SELECT status, reason FROM ordersvc.orders WHERE client_order_id='<id>'` |
 | Đặt lệnh trả **401/403** | Thiếu header `X-API-KEY: demo-key` | Thêm header |
 | Đặt lệnh trả **429** | Vượt rate limit 200 req/s — đúng thiết kế | Giảm tải, hoặc chỉnh `resilience4j.ratelimiter` |
 | Đặt lệnh trả **422** giá lệch | Fat-finger check chặn lệch >5% so với giá tham chiếu | Đặt giá gần `lastPrice` lấy từ `/api/v1/marketdata/<symbol>` |
