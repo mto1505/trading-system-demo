@@ -15,6 +15,7 @@ import java.util.Map;
  * - Realtime: đọc từ in-memory snapshot (<1ms)
  * - Lịch sử: đọc từ Postgres
  */
+@CrossOrigin("*")
 @RestController
 @RequestMapping("/api/v1/marketdata")
 public class MarketDataController {

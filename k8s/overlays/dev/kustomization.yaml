@@ -69,3 +69,12 @@ patches:
     target: { kind: StatefulSet, name: postgres }
   - path: patch-ingress.yaml
   - path: patch-quota.yaml
+  # Hạ request RAM của hạ tầng phụ trợ cho vừa node minikube ~3.8Gi.
+  - path: patch-schema-registry.yaml
+    target: { kind: Deployment, name: schema-registry }
+  - path: patch-zipkin.yaml
+    target: { kind: Deployment, name: zipkin }
+  - path: patch-redis.yaml
+    target: { kind: Deployment, name: redis }
+  - path: patch-prometheus.yaml
+    target: { kind: Deployment, name: prometheus }

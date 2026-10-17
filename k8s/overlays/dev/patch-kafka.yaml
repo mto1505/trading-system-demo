@@ -1,4 +1,6 @@
 # Kafka dev: 1 broker nhỏ, PVC 3Gi.
+# Request hạ còn 384Mi để schedule vừa node ~3.8Gi; limit giữ 1Gi vì -Xmx640m
+# cần chỗ cho heap + page cache của log segment.
 # LƯU Ý: volumeClaimTemplates là IMMUTABLE trên StatefulSet đã tồn tại - đổi
 # dung lượng thì phải `kubectl delete sts kafka --cascade=orphan` rồi apply lại.
 apiVersion: apps/v1
@@ -14,7 +16,7 @@ spec:
             - name: KAFKA_HEAP_OPTS
               value: "-Xms256m -Xmx640m"
           resources:
-            requests: { cpu: 200m, memory: 1Gi }
+            requests: { cpu: 200m, memory: 384Mi }
             limits:   { memory: 1Gi }
   volumeClaimTemplates:
     - metadata: { name: data }

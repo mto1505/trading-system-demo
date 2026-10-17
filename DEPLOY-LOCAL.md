@@ -254,6 +254,134 @@ Metric đáng xem trên Prometheus:
 
 ---
 
+## Giao diện UI local (`ui/index.html`)
+
+Thư mục `ui/` chứa **đúng một file HTML tĩnh** — dashboard gộp cả 4 service vào
+một màn hình: bảng giá + rủi ro realtime, form đặt lệnh, tra cứu execution, và
+nút bơm tick cho mã `DEMO1`. Bootstrap nạp qua CDN, **không có `package.json`,
+không cần build, không cần cài dependency**.
+
+### Vì sao không mở thẳng bằng `file://`
+
+Trang gọi `fetch()` tới **4 origin khác nhau** (`localhost:8081`–`8084`), trong
+khi 4 service **không trả header `Access-Control-Allow-Origin`**:
+
+```bash
+curl -s -i -H "Origin: http://localhost:8080" http://localhost:8082/api/v1/marketdata | head -5
+# HTTP/1.1 200
+# Content-Type: application/json      <- co du lieu, nhung KHONG co Access-Control-Allow-Origin
+```
+
+Hệ quả: mở bằng `file://` (Origin = `null`) hoặc serve ở bất kỳ cổng nào khác
+8081–8084, trình duyệt sẽ **chặn sạch mọi request**. Màn hình chỉ hiện
+*"Failed to fetch. Are the services running on localhost? CORS issue?"* — dù
+backend hoàn toàn khoẻ. Đây là lỗi dễ chẩn đoán nhầm thành "service chưa chạy".
+
+### Cách 1 — static server + proxy same-origin (không đụng vào code)
+
+Dựng một server Node nhỏ làm 3 việc: serve file tĩnh, rewrite URL tuyệt đối
+trong HTML lúc gửi đi, và proxy `/p/<cổng>/...` về `127.0.0.1:<cổng>`. Mọi
+request khi đó **cùng origin `localhost:8080`** nên không còn CORS.
+**File `ui/index.html` gốc không bị sửa.**
+
+Lưu đoạn sau thành `ui/serve.js`:
+
+```js
+// Static server cho ui/ + proxy same-origin toi backend (tranh CORS)
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const UI_DIR = __dirname;
+const PORT = 8080;
+const PORTS = ['8081', '8082', '8083', '8084'];
+
+const server = http.createServer((req, res) => {
+  const m = req.url.match(/^\/p\/(\d{4})(\/.*)$/);
+  if (m && PORTS.includes(m[1])) {
+    const pr = http.request(
+      { host: '127.0.0.1', port: +m[1], path: m[2], method: req.method,
+        headers: { ...req.headers, host: `127.0.0.1:${m[1]}` } },
+      (pres) => { res.writeHead(pres.statusCode, pres.headers); pres.pipe(res); }
+    );
+    pr.on('error', (e) => { res.writeHead(502); res.end('proxy error: ' + e.message); });
+    req.pipe(pr);
+    return;
+  }
+
+  let file = req.url.split('?')[0];
+  if (file === '/' || file === '') file = '/index.html';
+  const full = path.join(UI_DIR, path.normalize(file).replace(/^[\/]+/, ''));
+  fs.readFile(full, (err, buf) => {
+    if (err) { res.writeHead(404); res.end('Not found'); return; }
+    if (full.endsWith('.html')) {
+      let html = buf.toString('utf8');
+      for (const p of PORTS) html = html.split(`http://localhost:${p}/api/v1`).join(`/p/${p}/api/v1`);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html);
+    } else { res.writeHead(200); res.end(buf); }
+  });
+});
+
+server.listen(PORT, () => console.log(`UI running at http://localhost:${PORT}`));
+```
+
+Chạy:
+
+```powershell
+# Can 4 service da UP truoc (xem buoc A3)
+node ui\serve.js
+# UI running at http://localhost:8080
+```
+
+Kiểm tra nhanh proxy có thông không:
+
+```powershell
+curl.exe -s http://localhost:8080/p/8082/api/v1/marketdata
+# Mong doi: JSON gia + rui ro, giong het khi goi thang localhost:8082
+```
+
+### Cách 2 — bật CORS ở backend (sạch hơn về lâu dài)
+
+Thêm vào mỗi service (hoặc module `common-contracts` dùng chung) một
+`WebMvcConfigurer`:
+
+```java
+@Configuration
+public class CorsConfig implements WebMvcConfigurer {
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/api/**")
+                .allowedOrigins("http://localhost:8080")
+                .allowedMethods("GET", "POST", "OPTIONS")
+                .allowedHeaders("*");
+    }
+}
+```
+
+Sau đó serve `ui/` bằng bất cứ static server nào (`npx serve ui`,
+`python -m http.server`) là chạy được, không cần proxy.
+
+> Chỉ mở CORS cho origin cụ thể của UI local. **Không** dùng `allowedOrigins("*")`
+> kèm `X-API-KEY` — đây là API có xác thực, mở toàn bộ là lỗ hổng thật.
+
+### Dùng UI thế nào cho đúng
+
+| Panel | Gọi tới | Ghi chú |
+|---|---|---|
+| Market Data (Realtime) | `GET 8082 /api/v1/marketdata` | Bấm **Refresh** để nạp lại |
+| Place Order | `POST 8083 /api/v1/orders` | Gửi kèm header `X-API-KEY: demo-key` |
+| Executions | `GET 8084 /api/v1/executions/{clientOrderId}` | Tự tra lại sau 2s và 5s kể từ lúc đặt lệnh |
+| Pump 6 ticks for DEMO1 | `POST 8081 /api/v1/ticks` | 6 tick cùng giá 28500 → volatility ≈ 0 |
+
+**Bẫy thường gặp:** 4 mã của feed giả lập (HPG, VCB, FPT, VN30F2607) luôn ở
+`riskLevel = HIGH` nên **mọi lệnh trên chúng đều bị từ chối `RISK_LEVEL_HIGH`**
+(xem lỗi #2). Quy trình đúng: bấm **Pump 6 ticks for DEMO1** trước → đặt lệnh với
+symbol `DEMO1`. Dữ liệu giá chỉ sống ~10 giây, nên nếu để lâu mới đặt lệnh thì
+phải bơm tick lại.
+
+---
+
 ## Truy cập hệ thống từ máy Windows
 
 ### Vì sao chỉ cần `localhost`
@@ -278,6 +406,7 @@ Trình duyệt Windows ──► localhost:3000 ──► Docker Desktop proxy �
 
 | Giao diện | URL | Đăng nhập |
 |---|---|---|
+| **UI dashboard** — xem giá + đặt lệnh trên trình duyệt | http://localhost:8080 (phải chạy `node ui/serve.js` trước — xem mục *Giao diện UI local*) | — |
 | **Grafana** — dashboard chính | http://localhost:3000 | `admin` / `admin` |
 | **Prometheus** — truy vấn metric | http://localhost:9090 | — |
 | **Prometheus targets** — xem service nào DOWN | http://localhost:9090/targets | — |
@@ -627,7 +756,7 @@ kubectl -n trading-dev port-forward svc/order-service 8083:8083
 
 ---
 
-## Lỗi đã phát hiện khi deploy thật (2026-10-04)
+## Lỗi đã phát hiện khi deploy thật (2026-10-04, bổ sung 2026-10-06)
 
 Ghi lại những thứ chặn hệ thống chạy đúng, phát hiện trong lần deploy đầu tiên trên máy này.
 
@@ -772,6 +901,31 @@ docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
   --topic stock.orders --reset-offsets --to-earliest --execute
 docker compose start matching-engine
 ```
+
+---
+
+### #6 — `ui/index.html` không gọi được API vì backend thiếu CORS ⚠️ CHƯA SỬA (đã có cách vòng)
+
+**Triệu chứng:** mở `ui/index.html` bằng `file://` hoặc serve ở cổng bất kỳ, bảng
+Market Data đứng ở *"Failed to fetch. Are the services running on localhost? CORS
+issue?"*, đặt lệnh báo *"Connection failed"* — trong khi `curl` tới đúng các URL
+đó vẫn trả 200.
+
+**Nguyên nhân:** trang gọi `fetch()` tới 4 origin `localhost:8081`–`8084`, nhưng
+không service nào cấu hình CORS nên response không có `Access-Control-Allow-Origin`.
+Trình duyệt chặn ở tầng ngoài, request thật ra vẫn tới được server:
+
+```bash
+curl -s -i -H "Origin: http://localhost:8080" http://localhost:8082/api/v1/marketdata | head -5
+# 200 + du lieu, nhung khong co Access-Control-Allow-Origin  -> browser se chan
+```
+
+**Cách xử lý:** chạy UI sau một static server có proxy same-origin
+(`node ui/serve.js`, port 8080) — xem mục *Giao diện UI local*. Sửa triệt để thì
+thêm `WebMvcConfigurer` mở CORS cho origin của UI ở từng service.
+
+**Ghi nhận:** kiểm chứng 2026-10-06, cả 4 cổng 8081–8084 đều `LISTENING` và API
+trả dữ liệu đúng; lỗi thuần tuý nằm ở thiếu header CORS.
 
 ---
 

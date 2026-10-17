@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /** Tra cứu kết quả khớp - dùng để verify idempotency (1 clientOrderId = đúng 1 execution). */
+@CrossOrigin("*")
 @RestController
 @RequestMapping("/api/v1/executions")
 public class ExecutionController {

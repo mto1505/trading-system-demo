@@ -11,6 +11,7 @@ import java.util.List;
  * REST endpoint cho nguồn dữ liệu ngoài bơm tick vào
  * (nếu nguồn là FIX/binary feed thì thay bằng adapter tương ứng).
  */
+@CrossOrigin("*")
 @RestController
 @RequestMapping("/api/v1/ticks")
 public class TickController {

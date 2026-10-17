@@ -1,6 +1,19 @@
 # Dev chạy trên laptop/minikube: ép mọi thứ vừa một máy.
-# 768Mi là SÀN của JVM này - thấp hơn thì heap + metaspace + code cache không
-# đủ và container bị OOMKill ngay lúc Flyway + Hibernate khởi động.
+#
+# LIMIT giữ nguyên 768Mi — đó là SÀN của JVM này. Dockerfile đặt
+# -XX:MaxRAMPercentage=75 nên heap = 75% của LIMIT (576Mi); hạ limit xuống nữa
+# thì heap + metaspace + code cache không đủ và container bị OOMKill ngay lúc
+# Flyway + Hibernate khởi động.
+#
+# REQUEST hạ xuống 320Mi vì request CHỈ dùng để scheduler xếp pod, không liên
+# quan tới heap hay tới ngưỡng OOMKill. Node minikube ở đây chỉ có ~3.8Gi
+# allocatable; để request == limit thì 4 service chiếm 3Gi và cả stack không
+# bao giờ schedule nổi.
+#
+# ĐÁNH ĐỔI: request != limit -> QoS tụt từ Guaranteed xuống Burstable, pod có
+# thể bị evict khi node thiếu RAM. Ở dev chấp nhận được; staging/prod vẫn giữ
+# request == limit theo base.
+#
 # (patch này gắn vào 4 Deployment ứng dụng qua `target` trong kustomization)
 apiVersion: apps/v1
 kind: Deployment
@@ -12,5 +25,5 @@ spec:
       containers:
         - name: app
           resources:
-            requests: { cpu: 100m, memory: 768Mi }
+            requests: { cpu: 100m, memory: 320Mi }
             limits:   { memory: 768Mi }
