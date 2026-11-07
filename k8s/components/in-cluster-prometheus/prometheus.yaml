@@ -135,8 +135,15 @@ spec:
         - { protocol: TCP, port: 8082 }
         - { protocol: TCP, port: 8083 }
         - { protocol: TCP, port: 8084 }
-    # kubernetes_sd gọi API server. Không biết trước IP nên mở 443/6443 ra
-    # ngoài cluster-network; đây là nới lỏng có ý thức, chỉ dùng ở dev.
+    # kubernetes_sd gọi API server. Không biết trước IP nên mở ra ngoài
+    # cluster-network; đây là nới lỏng có ý thức, chỉ dùng ở dev.
+    #
+    # 8443 là BẮT BUỘC trên minikube. Client nối tới Service IP 10.96.0.1:443,
+    # nhưng kube-proxy DNAT thành <node-ip>:8443 TRƯỚC khi NetworkPolicy được
+    # xét — nên rule phải khớp cổng ĐÍCH THẬT sau DNAT, không phải cổng Service.
+    # Thiếu nó thì dưới Calico (kindnet không thực thi nên không lộ) Prometheus
+    # treo ở `dial tcp 10.96.0.1:443: i/o timeout` và activeTargets rỗng.
     - ports:
         - { protocol: TCP, port: 443 }
         - { protocol: TCP, port: 6443 }
+        - { protocol: TCP, port: 8443 }

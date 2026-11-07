@@ -1,0 +1,21 @@
+# schema-registry dev: base đặt request 768Mi / limit 1Gi — quá tay cho một
+# registry chỉ giữ vài chục schema.
+#
+# Đây là image Confluent, heap KHÔNG theo MaxRAMPercentage mà theo biến
+# SCHEMA_REGISTRY_HEAP_OPTS. Vì vậy hạ limit thì phải ghim heap tường minh,
+# nếu không JVM giữ heap mặc định và bị OOMKill.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: set-by-target   # bi `target` trong kustomization ghi de
+spec:
+  template:
+    spec:
+      containers:
+        - name: schema-registry
+          env:
+            - name: SCHEMA_REGISTRY_HEAP_OPTS
+              value: "-Xms128m -Xmx320m"
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { memory: 512Mi }

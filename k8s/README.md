@@ -122,12 +122,25 @@ kubectl apply -k k8s/overlays/dev
 kubectl -n trading-dev get pods -w
 kubectl -n trading-dev logs job/kafka-topics-init
 
-# 5. truy cap
+# 5. truy cap  -- LINUX. Tren Windows/macOS xem ghi chu ngay duoi.
 echo "$(minikube ip) trading.dev.local" | sudo tee -a /etc/hosts
-curl -H 'X-API-KEY: dev-key' http://trading.dev.local/api/v1/marketdata/VNM
+# Feed giả lập chỉ sinh 4 symbol: VN30F2607, HPG, VCB, FPT.
+curl -H 'X-API-KEY: dev-key' http://trading.dev.local/api/v1/marketdata/FPT
 kubectl -n trading-dev port-forward svc/prometheus 9090:9090
 kubectl -n trading-dev port-forward svc/zipkin 9411:9411
 ```
+
+> **Windows / macOS (driver docker): bước 5 ở trên KHÔNG chạy được.** Network
+> `minikube` nằm trong VM (WSL2 trên Windows), host không có route tới node IP
+> — hosts trỏ vào đó sẽ **timeout**, không phải 404. Thay bằng:
+>
+> ```bash
+> kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 80:80
+> # roi trong hosts: 127.0.0.1  trading.dev.local
+> ```
+>
+> Chi tiết và cách phân biệt timeout / 404 / 503 / 401:
+> [MINIKUBE-CHEATSHEET.md](MINIKUBE-CHEATSHEET.md) mục 8.
 
 ### staging
 

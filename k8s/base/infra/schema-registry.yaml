@@ -37,6 +37,14 @@ spec:
         app.kubernetes.io/part-of: trading-system
     spec:
       automountServiceAccountToken: false
+      # BẮT BUỘC: kubelet tiêm biến kiểu Docker-link cho mọi Service trong
+      # namespace, nên Service tên `schema-registry` sinh ra
+      # SCHEMA_REGISTRY_PORT=tcp://<clusterIP>:8081. Script khởi động của image
+      # Confluent kiểm tra đúng biến đó để phát hiện cấu hình `PORT` cũ đã bỏ,
+      # thấy có giá trị là `exit 1` ngay trước khi ghi schema-registry.properties.
+      # Container chết sau 2s, log chỉ in "PORT is deprecated". Compose không bị
+      # vì compose không tiêm biến này.
+      enableServiceLinks: false
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true

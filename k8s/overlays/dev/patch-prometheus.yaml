@@ -1,0 +1,15 @@
+# prometheus dev (component in-cluster-prometheus): Go chứ không phải JVM nên
+# nó tự co theo RAM còn trống, hạ limit không gây OOM đột ngột như JVM.
+# Scrape ~10 target với retention ngắn thì 512Mi là dư.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: set-by-target   # bi `target` trong kustomization ghi de
+spec:
+  template:
+    spec:
+      containers:
+        - name: prometheus
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            limits:   { memory: 512Mi }

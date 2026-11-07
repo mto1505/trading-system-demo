@@ -1,0 +1,14 @@
+# redis dev: chỉ dùng làm cache giá, dataset vài trăm KB. Request 256Mi của
+# base là thừa; limit giữ 256Mi làm trần an toàn.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: set-by-target   # bi `target` trong kustomization ghi de
+spec:
+  template:
+    spec:
+      containers:
+        - name: redis
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 256Mi }

@@ -1,4 +1,4 @@
-# Dev: HTTP thuần, host trỏ vào /etc/hosts hoặc nip.io. Không cert-manager.
+# Dev: HTTP thuần, host trỏ vào /etc/hosts hoặc nip.io. Không cert-manager.y
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

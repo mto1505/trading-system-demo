@@ -1,0 +1,21 @@
+# zipkin dev: STORAGE_TYPE=mem nên toàn bộ span nằm trong heap. Với
+# TRACING_PROBABILITY=1.0 của overlay dev, 200_000 span (mặc định base) sẽ ăn
+# hết 1Gi. Hạ còn 20_000 — thừa sức để soi một luồng đặt lệnh — rồi mới hạ
+# limit xuống 512Mi được.
+#
+# JAVA_OPTS giữ MaxRAMPercentage=70 của base -> heap = 358Mi theo limit mới.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: set-by-target   # bi `target` trong kustomization ghi de
+spec:
+  template:
+    spec:
+      containers:
+        - name: zipkin
+          env:
+            - name: MEM_MAX_SPANS
+              value: "20000"
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { memory: 512Mi }
