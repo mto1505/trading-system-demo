@@ -1,0 +1,20 @@
+# Thử thách 1. Triệu chứng: đã apply policy này, nhưng frontend -> backend:8080
+# vẫn DROP. `kubectl get netpol` thấy policy nằm đó đàng hoàng.
+# (Chạy sau khi đã có default-deny + allow-dns + 22-frontend-egress-ok.yaml)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-frontend
+  namespace: calico-lab
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: frontend
+      ports:
+        - { protocol: TCP, port: 80 }

@@ -1,0 +1,17 @@
+# Thử thách 2. Triệu chứng: mảng `egress` viết rõ ràng, nhưng frontend vẫn không
+# ra được backend. Policy apply không hề báo lỗi.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-allow-to-backend
+  namespace: calico-lab
+spec:
+  podSelector:
+    matchLabels: { app: frontend }
+  policyTypes: [Ingress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: backend }
+      ports:
+        - { protocol: TCP, port: 80 }

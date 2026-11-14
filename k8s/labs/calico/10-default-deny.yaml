@@ -1,0 +1,11 @@
+# Zero-trust: podSelector rỗng = CHỌN MỌI POD trong namespace.
+# Không có mảng ingress/egress nào -> không có gì được phép.
+# Policy chỉ có hiệu lực trong namespace của chính nó; trading-dev không bị đụng tới.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: calico-lab
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

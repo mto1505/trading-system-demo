@@ -1,0 +1,19 @@
+# MỘT phần tử trong `from`, chứa CẢ HAI selector -> logic AND:
+#   "pod có nhãn app=ext-client  VÀ  nằm trong namespace có nhãn tier=external"
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-external
+  namespace: calico-lab
+spec:
+  podSelector:
+    matchLabels: { app: backend }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { tier: external }
+          podSelector:
+            matchLabels: { app: ext-client }
+      ports:
+        - { protocol: TCP, port: 80 }

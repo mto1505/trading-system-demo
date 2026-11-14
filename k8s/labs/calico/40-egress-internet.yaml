@@ -1,0 +1,23 @@
+# Cho frontend ra Internet cổng 443, nhưng cắt mọi dải private.
+# ipBlock là selector DUY NHẤT nói chuyện bằng IP; nó KHÔNG hiểu pod hay namespace.
+# 10.0.0.0/8 trong `except` cũng cắt luôn pool pod 10.244.0.0/16 -> không thể
+# dùng ipBlock để lách vào pod. Đây là cách viết egress "ra ngoài" an toàn.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-allow-internet
+  namespace: calico-lab
+spec:
+  podSelector:
+    matchLabels: { app: frontend }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - { protocol: TCP, port: 443 }

@@ -1,0 +1,17 @@
+# Bản đúng: khớp cổng ĐÍCH THẬT sau DNAT (80).
+# Cùng tên metadata với file 21 nên `kubectl apply` sẽ ghi đè, không cần xoá.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-allow-to-backend
+  namespace: calico-lab
+spec:
+  podSelector:
+    matchLabels: { app: frontend }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: backend }
+      ports:
+        - { protocol: TCP, port: 80 }

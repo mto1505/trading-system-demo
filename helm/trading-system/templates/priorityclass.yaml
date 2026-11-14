@@ -1,0 +1,12 @@
+{{- if .Values.priorityClass.enabled }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: trading-critical
+value: {{ .Values.priorityClass.value }}
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: >-
+  Ưu tiên cao cho workload trading. Pod thường (default priority 0) sẽ bị
+  preempt nếu node thiếu tài nguyên.
+{{- end }}

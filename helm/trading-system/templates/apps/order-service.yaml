@@ -1,0 +1,149 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: order-service
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  labels:
+    {{ include "trading.appLabels" (dict "name" "order-service" "component" .Values.orderService.component "context" .) | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: order-service
+  ports:
+    - { name: http, port: {{ .Values.orderService.port }}, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  labels:
+    {{ include "trading.appLabels" (dict "name" "order-service" "component" .Values.orderService.component "context" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.orderService.replicaCount }}
+  revisionHistoryLimit: 5
+  minReadySeconds: {{ .Values.orderService.minReadySeconds | default 15 }}
+  progressDeadlineSeconds: {{ .Values.orderService.progressDeadlineSeconds | default 600 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.orderService.strategy.maxSurge | default 1 }}
+      maxUnavailable: {{ .Values.orderService.strategy.maxUnavailable | default 0 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: order-service
+        app.kubernetes.io/component: {{ .Values.orderService.component }}
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+      annotations:
+        {{ include "trading.prometheusAnnotations" (dict "port" .Values.orderService.port) | nindent 8 }}
+        {{ include "trading.configChecksum" . | nindent 8 }}
+    spec:
+      serviceAccountName: order-service
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.orderService.terminationGracePeriodSeconds | default 60 }}
+      securityContext:
+        {{- include "trading.appPodSecurityContext" . | nindent 8 }}
+      {{- if .Values.priorityClass.enabled }}
+      priorityClassName: trading-critical
+      {{- end }}
+      {{- include "trading.topologySpread" (dict "spread" .Values.orderService.topologySpread "name" "order-service") | nindent 6 }}
+      {{- if .Values.orderService.initContainers.waitForDb }}
+      initContainers:
+        - name: wait-for-db
+          image: {{ .Values.postgres.image | default "postgres:16.4-alpine" }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$PGUSER" -t 3; do
+                echo "cho postgres tai $DB_HOST:$DB_PORT"; sleep 2
+              done
+              echo "postgres da nhan ket noi"
+          env:
+            - name: DB_HOST
+              valueFrom: { configMapKeyRef: { name: trading-config, key: DB_HOST } }
+            - name: DB_PORT
+              valueFrom: { configMapKeyRef: { name: trading-config, key: DB_PORT } }
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: trading-secrets, key: DB_USER } }
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits:   { memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 999
+            capabilities: { drop: ["ALL"] }
+      {{- end }}
+      containers:
+        - name: app
+          image: {{ include "trading.image" .Values.orderService.image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: {{ .Values.orderService.port }}, protocol: TCP }
+          envFrom:
+            - configMapRef: { name: trading-config }
+          env:
+            - name: DB_USER
+              valueFrom: { secretKeyRef: { name: trading-secrets, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: trading-secrets, key: DB_PASSWORD } }
+            - name: ORDER_API_KEY
+              valueFrom: { secretKeyRef: { name: trading-secrets, key: ORDER_API_KEY } }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+          resources:
+            {{- toYaml .Values.orderService.resources | nindent 12 }}
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          lifecycle:
+            preStop:
+              sleep: { seconds: 5 }
+          securityContext:
+            {{- include "trading.appContainerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 128Mi }
+---
+{{- if .Values.orderService.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: order-service
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order-service
+{{- end }}

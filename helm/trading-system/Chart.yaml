@@ -1,0 +1,16 @@
+apiVersion: v2
+name: trading-system
+description: |
+  Helm chart for trading-system containing 4 microservices (market-gateway,
+  pricing-risk-service, order-service, matching-engine) and supporting infrastructure
+  (Kafka, Postgres, Redis, Schema Registry, Zipkin, Monitoring, KEDA).
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+maintainers:
+  - name: trading-team
+keywords:
+  - trading
+  - kafka
+  - spring-boot
+  - keda

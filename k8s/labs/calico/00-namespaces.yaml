@@ -1,0 +1,18 @@
+# Hai namespace cho lab. Nhãn trên namespace là thứ `namespaceSelector` nhìn vào.
+# `kubernetes.io/metadata.name` do apiserver tự gắn, nhưng `tier` thì mình tự đặt
+# để thấy rõ selector hoạt động thế nào.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: calico-lab
+  labels:
+    lab: calico
+    tier: app
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: calico-lab-ext
+  labels:
+    lab: calico
+    tier: external

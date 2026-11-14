@@ -1,0 +1,21 @@
+# HAI phần tử (chú ý dấu `-` thứ hai) -> logic OR:
+#   "bất kỳ pod nào trong namespace tier=external
+#    HOẶC bất kỳ pod nào tên app=ext-client trong CHÍNH namespace calico-lab"
+# Khác file 30 đúng một ký tự gạch đầu dòng. Hậu quả bảo mật thì khác hẳn.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-external
+  namespace: calico-lab
+spec:
+  podSelector:
+    matchLabels: { app: backend }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { tier: external }
+        - podSelector:
+            matchLabels: { app: ext-client }
+      ports:
+        - { protocol: TCP, port: 80 }

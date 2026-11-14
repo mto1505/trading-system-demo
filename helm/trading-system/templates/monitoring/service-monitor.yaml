@@ -1,0 +1,16 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: trading-infra
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+      app.kubernetes.io/component: infra
+  endpoints:
+    - port: metrics
+      interval: 30s
+{{- end }}

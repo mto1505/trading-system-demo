@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      default:
+        memory: {{ .Values.limitRange.default.memory }}
+        {{- if .Values.limitRange.default.cpu }}
+        cpu: {{ .Values.limitRange.default.cpu }}
+        {{- end }}
+      defaultRequest:
+        cpu: {{ .Values.limitRange.defaultRequest.cpu }}
+        memory: {{ .Values.limitRange.defaultRequest.memory }}
+      max:
+        {{- if .Values.limitRange.max.cpu }}
+        cpu: {{ .Values.limitRange.max.cpu | quote }}
+        {{- end }}
+        memory: {{ .Values.limitRange.max.memory }}
+      min:
+        cpu: {{ .Values.limitRange.min.cpu }}
+        memory: {{ .Values.limitRange.min.memory }}
+    - type: PersistentVolumeClaim
+      max: { storage: 200Gi }
+      min: { storage: 1Gi }

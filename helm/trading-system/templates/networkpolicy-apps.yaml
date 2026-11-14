@@ -1,0 +1,75 @@
+{{- if .Values.networkPolicy.enabled }}
+# Ingress -> order-service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-order-service
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: order-service
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - { protocol: TCP, port: {{ .Values.orderService.port }} }
+---
+# App -> infra egress (in-cluster)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trading-apps-egress
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+  policyTypes: [Egress]
+  egress:
+    {{- if .Values.kafka.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kafka
+      ports:
+        - { protocol: TCP, port: 9092 }
+    {{- end }}
+    {{- if .Values.postgres.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - { protocol: TCP, port: 5432 }
+    {{- end }}
+    {{- if .Values.redis.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - { protocol: TCP, port: 6379 }
+    {{- end }}
+    {{- if .Values.schemaRegistry.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: schema-registry
+      ports:
+        - { protocol: TCP, port: 8081 }
+    {{- end }}
+    {{- if .Values.zipkin.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: zipkin
+      ports:
+        - { protocol: TCP, port: 9411 }
+    {{- end }}
+{{- end }}

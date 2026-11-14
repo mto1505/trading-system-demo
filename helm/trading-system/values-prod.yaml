@@ -1,0 +1,165 @@
+# =============================================================================
+# values-prod.yaml — Tương đương k8s/overlays/prod
+# Deploy: helm upgrade --install trading ./helm/trading-system \
+#           -f ./helm/trading-system/values-prod.yaml -n trading-prod --create-namespace
+#
+# CI ghi đè digest khi release:
+#   --set marketGateway.image.digest=sha256:...
+#   --set pricingRiskService.image.digest=sha256:...
+#   --set orderService.image.digest=sha256:...
+#   --set matchingEngine.image.digest=sha256:...
+# =============================================================================
+
+# Prod dùng RDS và Managed Kafka ngoài cluster
+postgres:
+  enabled: false
+
+kafka:
+  enabled: false
+
+kafkaTopicsJob:
+  enabled: false
+
+redis:
+  enabled: true
+
+schemaRegistry:
+  enabled: true
+
+zipkin:
+  enabled: true
+
+prometheus:
+  inCluster:
+    enabled: false
+
+monitoring:
+  enabled: true
+
+keda:
+  enabled: true
+  pricingRiskService:
+    minReplicaCount: 2
+    maxReplicaCount: 4
+    lagThreshold: "50"
+  matchingEngine:
+    minReplicaCount: 2
+    maxReplicaCount: 4
+    lagThreshold: "50"
+
+externalSecrets:
+  enabled: true
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  data:
+    dbKey: trading/prod/db
+    apiKey: trading/prod/api
+
+priorityClass:
+  enabled: true
+  value: 1000000
+
+secrets:
+  create: false
+
+config:
+  KAFKA_BOOTSTRAP: "kafka-bootstrap.trading.internal:9092"
+  DB_HOST: "trading-prod.abcdefg.ap-southeast-1.rds.amazonaws.com"
+  KAFKA_PARTITIONS: "12"
+  KAFKA_TOPIC_REPLICAS: "3"
+  TRACING_PROBABILITY: "0.05"
+  SIMULATED_FEED: "false"
+  OUTBOX_RELAY_ENABLED: "true"
+  LOGGING_LEVEL_ROOT: "WARN"
+  LOGGING_LEVEL_COM_TRADING: "INFO"
+
+marketGateway:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/trading-system/market-gateway
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { memory: 1Gi }
+
+pricingRiskService:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/trading-system/pricing-risk-service
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { memory: 1Gi }
+  topologySpread:
+    whenUnsatisfiable: DoNotSchedule
+
+orderService:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/trading-system/order-service
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { memory: 1Gi }
+  topologySpread:
+    whenUnsatisfiable: DoNotSchedule
+
+matchingEngine:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/trading-system/matching-engine
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { memory: 1Gi }
+  topologySpread:
+    whenUnsatisfiable: DoNotSchedule
+
+ingress:
+  host: trading.example.com
+  tls:
+    enabled: true
+    secretName: trading-tls
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "2"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+networkPolicy:
+  enabled: true
+  externalDb:
+    enabled: true
+    cidr: 10.100.0.0/16
+  externalKafka:
+    enabled: true
+    cidr: 10.200.0.0/16
+  externalKafkaPlatform:
+    enabled: true
+    cidr: 10.200.0.0/16
+
+limitRange:
+  default:
+    cpu: "1"
+    memory: 1Gi
+  defaultRequest:
+    cpu: 250m
+    memory: 256Mi
+  max:
+    cpu: "4"
+    memory: 4Gi
+  min:
+    cpu: 50m
+    memory: 64Mi
+
+resourceQuota:
+  requests:
+    cpu: "16"
+    memory: 16Gi
+  limits:
+    cpu: "32"
+    memory: 32Gi
+  pods: "50"

@@ -1,0 +1,139 @@
+{{- if .Values.networkPolicy.enabled }}
+# Kafka: nhận từ 4 service, từ schema-registry và từ Job tạo topic
+{{- if .Values.kafka.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: kafka }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [gateway, pricing, order, matching]
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: schema-registry }
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: init-kafka-topics }
+      ports: [{ protocol: TCP, port: 9092 }]
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka }
+      ports:
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9093 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka }
+      ports:
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9093 }
+---
+{{- end }}
+# Postgres
+{{- if .Values.postgres.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: postgres }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [pricing, order, matching]
+      ports: [{ protocol: TCP, port: 5432 }]
+  egress: []
+---
+{{- end }}
+# Redis
+{{- if .Values.redis.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: redis }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/component: order }
+      ports: [{ protocol: TCP, port: 6379 }]
+  egress: []
+---
+{{- end }}
+# Schema Registry
+{{- if .Values.schemaRegistry.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: schema-registry
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: schema-registry }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [gateway, pricing, order, matching]
+      ports: [{ protocol: TCP, port: 8081 }]
+  egress:
+    {{- if .Values.kafka.enabled }}
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka }
+      ports: [{ protocol: TCP, port: 9092 }]
+    {{- end }}
+---
+{{- end }}
+# Zipkin
+{{- if .Values.zipkin.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: zipkin
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: zipkin }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [gateway, pricing, order, matching]
+      ports: [{ protocol: TCP, port: 9411 }]
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+      ports: [{ protocol: TCP, port: 9411 }]
+  egress: []
+{{- end }}
+{{- end }}

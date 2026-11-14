@@ -1,0 +1,28 @@
+# ⚠️ TUỲ CHỌN — đọc kỹ Bài 11 trước khi apply.
+#
+# Đây là tài nguyên RIÊNG của Calico, không phải NetworkPolicy của Kubernetes.
+# Nó làm được ba thứ mà NetworkPolicy chuẩn KHÔNG làm được:
+#   1. action: Deny       — chặn tường minh (NetworkPolicy chuẩn chỉ có "allow")
+#   2. order              — số nhỏ chạy trước, tức là CÓ thứ tự ưu tiên
+#   3. không namespace     — hiệu lực toàn cluster
+#
+# Vì nó toàn cluster nên selector dưới đây được khoá chặt vào namespace lab.
+# ĐỪNG nới selector này ra nếu chưa muốn tự cắt mạng cluster của mình.
+#
+# apiVersion dùng crd.projectcalico.org/v1 (dạng lưu trong etcd) vì minikube
+# --cni=calico KHÔNG cài calico-apiserver nên không có group projectcalico.org/v3.
+# Hệ quả: không có validation/defaulting — sai chính tả trường là policy im lặng
+# không chạy chứ không báo lỗi. Luôn ĐO lại bằng probe, đừng tin apply thành công.
+apiVersion: crd.projectcalico.org/v1
+kind: GlobalNetworkPolicy
+metadata:
+  name: lab-deny-attacker
+spec:
+  order: 100
+  namespaceSelector: "kubernetes.io/metadata.name == 'calico-lab'"
+  selector: "app == 'backend'"
+  types: [Ingress]
+  ingress:
+    - action: Deny
+      source:
+        selector: "app == 'attacker'"

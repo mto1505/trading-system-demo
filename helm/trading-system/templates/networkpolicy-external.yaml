@@ -1,0 +1,67 @@
+{{- if .Values.networkPolicy.enabled }}
+# Egress ra RDS / Cloud SQL ngoài cluster
+{{- if .Values.networkPolicy.externalDb.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-db-egress
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.externalDb.cidr }}
+      ports:
+        - { protocol: TCP, port: 5432 }
+---
+{{- end }}
+# Egress ra Kafka broker managed ngoài cluster
+{{- if .Values.networkPolicy.externalKafka.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-kafka-egress
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.externalKafka.cidr }}
+      ports:
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9093 }
+        - { protocol: TCP, port: 9094 }
+---
+{{- end }}
+# Egress ra Schema Registry / Kafka Connect ngoài cluster
+{{- if .Values.networkPolicy.externalKafkaPlatform.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-external-kafka-platform-egress
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.externalKafkaPlatform.cidr }}
+      ports:
+        - { protocol: TCP, port: 8081 }
+        - { protocol: TCP, port: 8083 }
+{{- end }}
+{{- end }}

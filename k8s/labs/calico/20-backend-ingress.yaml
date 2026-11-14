@@ -1,0 +1,17 @@
+# Chiều VÀO backend: chỉ pod app=frontend, chỉ cổng 80.
+# 80 là cổng CONTAINER thật, không phải cổng 8080 của Service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-frontend
+  namespace: calico-lab
+spec:
+  podSelector:
+    matchLabels: { app: backend }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: frontend }
+      ports:
+        - { protocol: TCP, port: 80 }

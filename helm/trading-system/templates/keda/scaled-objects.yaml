@@ -1,0 +1,51 @@
+{{- if .Values.keda.enabled }}
+# Scale pricing-risk-service theo consumer lag trên topic
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: pricing-risk-service
+  labels:
+    app.kubernetes.io/name: pricing-risk-service
+    app.kubernetes.io/component: pricing
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: pricing-risk-service
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  minReplicaCount: {{ .Values.keda.pricingRiskService.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.pricingRiskService.maxReplicaCount }}
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: {{ .Values.config.KAFKA_BOOTSTRAP }}
+        consumerGroup: {{ .Values.keda.pricingRiskService.consumerGroup }}
+        topic: {{ .Values.keda.pricingRiskService.topic }}
+        lagThreshold: {{ .Values.keda.pricingRiskService.lagThreshold | quote }}
+        offsetResetPolicy: latest
+---
+# Scale matching-engine theo consumer lag trên topic
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: matching-engine
+  labels:
+    app.kubernetes.io/name: matching-engine
+    app.kubernetes.io/component: matching
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: matching-engine
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  minReplicaCount: {{ .Values.keda.matchingEngine.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.matchingEngine.maxReplicaCount }}
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: {{ .Values.config.KAFKA_BOOTSTRAP }}
+        consumerGroup: {{ .Values.keda.matchingEngine.consumerGroup }}
+        topic: {{ .Values.keda.matchingEngine.topic }}
+        lagThreshold: {{ .Values.keda.matchingEngine.lagThreshold | quote }}
+        offsetResetPolicy: latest
+{{- end }}

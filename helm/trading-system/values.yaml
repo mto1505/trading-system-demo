@@ -1,0 +1,274 @@
+# =============================================================================
+# values.yaml — Giá trị mặc định (Base)
+# Tương đương k8s/base + config/trading.env trong cấu trúc Kustomize.
+# Overlay-specific values nằm ở values-{dev,staging,prod}.yaml.
+# =============================================================================
+
+global:
+  partOf: trading-system
+
+# Namespace
+namespace:
+  create: true
+
+# ---------------------------------------------------------------------------
+# Hạ tầng: bật/tắt từng thành phần
+# ---------------------------------------------------------------------------
+postgres:
+  enabled: true          # false ở prod → dùng RDS
+  image: postgres:16.4-alpine
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  storage: 1Gi
+
+kafka:
+  enabled: true          # false ở prod → dùng managed Kafka
+  image: bitnami/kafka:3.7.1
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { memory: 1Gi }
+  storage: 2Gi
+
+kafkaTopicsJob:
+  enabled: true          # false khi kafka.enabled=false (managed tự tạo topic)
+  image: bitnami/kafka:3.7.1
+
+redis:
+  enabled: true
+  image: redis:7.2-alpine
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 96Mi }
+
+schemaRegistry:
+  enabled: true
+  image: confluentinc/cp-schema-registry:7.7.0
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+zipkin:
+  enabled: true
+  image: openzipkin/zipkin-slim:3.4
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+
+# ---------------------------------------------------------------------------
+# Prometheus in-cluster (tối giản, cho dev)
+# ---------------------------------------------------------------------------
+prometheus:
+  inCluster:
+    enabled: false       # dev bật, staging/prod dùng kube-prometheus-stack
+  image: prom/prometheus:v2.54.1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+# ---------------------------------------------------------------------------
+# Monitoring: PodMonitor + ServiceMonitor (cần Prometheus Operator)
+# ---------------------------------------------------------------------------
+monitoring:
+  enabled: false         # staging/prod bật
+
+# ---------------------------------------------------------------------------
+# KEDA: autoscale consumer theo Kafka lag
+# ---------------------------------------------------------------------------
+keda:
+  enabled: false         # staging/prod bật
+  pollingInterval: 15
+  cooldownPeriod: 120
+  pricingRiskService:
+    minReplicaCount: 1
+    maxReplicaCount: 4
+    topic: market.ticks.enriched
+    consumerGroup: pricing-risk-service
+    lagThreshold: "50"
+  matchingEngine:
+    minReplicaCount: 1
+    maxReplicaCount: 4
+    topic: orders.validated
+    consumerGroup: matching-engine
+    lagThreshold: "50"
+
+# ---------------------------------------------------------------------------
+# External Secrets (ESO): dùng cho prod thay vì secretGenerator
+# ---------------------------------------------------------------------------
+externalSecrets:
+  enabled: false
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  data:
+    dbKey: trading/prod/db
+    apiKey: trading/prod/api
+
+# ---------------------------------------------------------------------------
+# PriorityClass (chỉ prod)
+# ---------------------------------------------------------------------------
+priorityClass:
+  enabled: false
+  value: 1000000
+
+# ---------------------------------------------------------------------------
+# ConfigMap — trading-config
+# Tương đương configMapGenerator + base/config/trading.env
+# ---------------------------------------------------------------------------
+config:
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: trading
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP: "kafka-0.kafka.trading.svc.cluster.local:9092"
+  KAFKA_PARTITIONS: "3"
+  KAFKA_TOPIC_REPLICAS: "1"
+  SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+  ZIPKIN_ENDPOINT: "http://zipkin:9411/api/v2/spans"
+  TRACING_PROBABILITY: "0.1"
+  SIMULATED_FEED: "true"
+  OUTBOX_RELAY_ENABLED: "true"
+  LOGGING_LEVEL_ROOT: "INFO"
+  LOGGING_LEVEL_COM_TRADING: "INFO"
+
+# ---------------------------------------------------------------------------
+# Secret — trading-secrets (dev/staging dùng trực tiếp, prod dùng ESO)
+# ---------------------------------------------------------------------------
+secrets:
+  create: true
+  DB_USER: trading
+  DB_PASSWORD: ""
+  ORDER_API_KEY: ""
+
+# ---------------------------------------------------------------------------
+# 4 Service nghiệp vụ
+# ---------------------------------------------------------------------------
+marketGateway:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/trading-system/market-gateway
+    tag: ""
+    digest: ""
+  port: 8080
+  component: gateway
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits: { memory: 512Mi }
+  topologySpread:
+    enabled: false
+    whenUnsatisfiable: ScheduleAnyway
+
+pricingRiskService:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/trading-system/pricing-risk-service
+    tag: ""
+    digest: ""
+  port: 8081
+  component: pricing
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits: { memory: 512Mi }
+  topologySpread:
+    enabled: true
+    whenUnsatisfiable: ScheduleAnyway
+
+orderService:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/trading-system/order-service
+    tag: ""
+    digest: ""
+  port: 8083
+  component: order
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits: { memory: 512Mi }
+  topologySpread:
+    enabled: true
+    whenUnsatisfiable: ScheduleAnyway
+  strategy:
+    maxSurge: 1
+    maxUnavailable: 0
+  minReadySeconds: 15
+  progressDeadlineSeconds: 600
+  terminationGracePeriodSeconds: 60
+  initContainers:
+    waitForDb: true
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+matchingEngine:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/trading-system/matching-engine
+    tag: ""
+    digest: ""
+  port: 8082
+  component: matching
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits: { memory: 512Mi }
+  topologySpread:
+    enabled: true
+    whenUnsatisfiable: ScheduleAnyway
+
+# ---------------------------------------------------------------------------
+# Ingress
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  host: trading.local
+  tls:
+    enabled: true
+    secretName: trading-tls
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "2"
+
+# ---------------------------------------------------------------------------
+# NetworkPolicy
+# ---------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+  externalDb:
+    enabled: false
+    cidr: 10.0.0.0/8
+  externalKafka:
+    enabled: false
+    cidr: 10.0.0.0/8
+  externalKafkaPlatform:
+    enabled: false
+    cidr: 10.0.0.0/8
+
+# ---------------------------------------------------------------------------
+# LimitRange & ResourceQuota
+# ---------------------------------------------------------------------------
+limitRange:
+  default:
+    cpu: 500m
+    memory: 512Mi
+  defaultRequest:
+    cpu: 100m
+    memory: 128Mi
+  max:
+    cpu: "2"
+    memory: 2Gi
+  min:
+    cpu: 10m
+    memory: 32Mi
+
+resourceQuota:
+  requests:
+    cpu: "8"
+    memory: 8Gi
+  limits:
+    cpu: "16"
+    memory: 16Gi
+  pods: "30"

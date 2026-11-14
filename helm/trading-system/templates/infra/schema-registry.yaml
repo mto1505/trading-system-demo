@@ -1,0 +1,78 @@
+{{- if .Values.schemaRegistry.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: schema-registry
+  labels:
+    app.kubernetes.io/name: schema-registry
+    app.kubernetes.io/component: platform
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: schema-registry
+  ports:
+    - { name: http, port: 8081, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schema-registry
+  labels:
+    app.kubernetes.io/name: schema-registry
+    app.kubernetes.io/component: platform
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: schema-registry
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: schema-registry
+        app.kubernetes.io/component: platform
+        app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: schema-registry
+          image: {{ .Values.schemaRegistry.image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8081 }
+          env:
+            - name: SCHEMA_REGISTRY_HOST_NAME
+              value: schema-registry
+            - name: SCHEMA_REGISTRY_LISTENERS
+              value: http://0.0.0.0:8081
+            - name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS
+              valueFrom: { configMapKeyRef: { name: trading-config, key: KAFKA_BOOTSTRAP } }
+            - name: SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR
+              valueFrom: { configMapKeyRef: { name: trading-config, key: KAFKA_TOPIC_REPLICAS } }
+            - name: SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL
+              value: full_transitive
+          resources:
+            {{- toYaml .Values.schemaRegistry.resources | nindent 12 }}
+          startupProbe:
+            httpGet: { path: /subjects, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: { path: /subjects, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: { path: /subjects, port: http }
+            periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+{{- end }}

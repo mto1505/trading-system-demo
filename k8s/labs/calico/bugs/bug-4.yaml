@@ -1,0 +1,19 @@
+# Thử thách 4. Triệu chứng: ingress của backend mở đúng app=frontend, đúng cổng 80,
+# nhãn cũng khớp (kiểm chứng bằng `kubectl get pod -l app=frontend`).
+# Vậy mà frontend -> backend vẫn treo rồi timeout.
+# (Chạy từ trạng thái sạch: reset, rồi apply 10 + 11 + file này)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-allow-frontend
+  namespace: calico-lab
+spec:
+  podSelector:
+    matchLabels: { app: backend }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: frontend }
+      ports:
+        - { protocol: TCP, port: 80 }

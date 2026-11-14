@@ -1,0 +1,105 @@
+# =============================================================================
+# values-staging.yaml — Tương đương k8s/overlays/staging
+# Deploy: helm upgrade --install trading ./helm/trading-system \
+#           -f ./helm/trading-system/values-staging.yaml -n trading-staging --create-namespace
+# =============================================================================
+
+postgres:
+  enabled: true
+
+kafka:
+  enabled: true
+
+redis:
+  enabled: true
+
+schemaRegistry:
+  enabled: true
+
+zipkin:
+  enabled: true
+
+prometheus:
+  inCluster:
+    enabled: false
+
+monitoring:
+  enabled: true
+
+keda:
+  enabled: true
+  pricingRiskService:
+    minReplicaCount: 1
+    maxReplicaCount: 2
+  matchingEngine:
+    minReplicaCount: 1
+    maxReplicaCount: 2
+
+externalSecrets:
+  enabled: false
+
+priorityClass:
+  enabled: false
+
+config:
+  KAFKA_BOOTSTRAP: "kafka-0.kafka.trading-staging.svc.cluster.local:9092"
+  KAFKA_PARTITIONS: "6"
+  KAFKA_TOPIC_REPLICAS: "1"
+  TRACING_PROBABILITY: "0.3"
+  SIMULATED_FEED: "true"
+  OUTBOX_RELAY_ENABLED: "true"
+  LOGGING_LEVEL_COM_TRADING: "INFO"
+
+secrets:
+  create: true
+  DB_USER: trading
+  DB_PASSWORD: ""
+  ORDER_API_KEY: ""
+
+marketGateway:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/trading-system/market-gateway
+    tag: main
+
+pricingRiskService:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/trading-system/pricing-risk-service
+    tag: main
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits: { memory: 768Mi }
+
+orderService:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/trading-system/order-service
+    tag: main
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits: { memory: 768Mi }
+
+matchingEngine:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/trading-system/matching-engine
+    tag: main
+  resources:
+    requests: { cpu: 200m, memory: 384Mi }
+    limits: { memory: 768Mi }
+
+ingress:
+  host: trading-staging.internal
+  tls:
+    enabled: true
+    secretName: trading-tls
+
+resourceQuota:
+  requests:
+    cpu: "6"
+    memory: 6Gi
+  limits:
+    cpu: "12"
+    memory: 12Gi
+  pods: "25"
