@@ -58,6 +58,11 @@ spec:
               valueFrom: { configMapKeyRef: { name: trading-config, key: KAFKA_TOPIC_REPLICAS } }
             - name: SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL
               value: full_transitive
+            # Mac dinh cua image cp-schema-registry la -Xmx512M. Ha
+            # resources.limits.memory xuong duoi do ma khong dat bien nay la
+            # OOMKilled luc khoi dong.
+            - name: SCHEMA_REGISTRY_HEAP_OPTS
+              value: {{ .Values.schemaRegistry.heapOpts | default "-Xmx512m" | quote }}
           resources:
             {{- toYaml .Values.schemaRegistry.resources | nindent 12 }}
           startupProbe:

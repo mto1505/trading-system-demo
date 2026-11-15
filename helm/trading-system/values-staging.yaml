@@ -25,15 +25,26 @@ prometheus:
 
 monitoring:
   enabled: true
+  namespace: monitoring
+  # PHAI khop ten release cua kube-prometheus-stack, neu khong Prometheus bo qua
+  # PodMonitor nay trong im lang. Lay bang:
+  #   helm -n monitoring list
+  extraLabels:
+    release: kube-prometheus-stack
 
 keda:
   enabled: true
+  # Staging co 6 partition -> tran 2 pod (6 / setConcurrency(3)).
   pricingRiskService:
     minReplicaCount: 1
     maxReplicaCount: 2
+    # Ha nguong so voi prod (1000) de QUAN SAT duoc KEDA scale khi ban ban tai
+    # thu: tong lag 200 la da len 2 pod.
+    lagThreshold: "100"
   matchingEngine:
     minReplicaCount: 1
     maxReplicaCount: 2
+    lagThreshold: "100"
 
 externalSecrets:
   enabled: false
@@ -94,6 +105,10 @@ ingress:
   tls:
     enabled: true
     secretName: trading-tls
+    # Dùng cert-manager Local Self-Signed Issuer để tự động hóa cấp phát TLS qua YAML:
+    selfSignedIssuer:
+      enabled: true
+      name: staging-selfsigned-issuer
 
 resourceQuota:
   requests:

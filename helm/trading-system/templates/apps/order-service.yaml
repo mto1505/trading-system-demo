@@ -142,7 +142,10 @@ metadata:
   labels:
     {{- include "trading.commonLabels" . | nindent 4 }}
 spec:
-  maxUnavailable: 0
+  # maxUnavailable (KHONG phai minAvailable): dung o MOI so replica.
+  # maxUnavailable: 0 chan MOI eviction tu nguyen -> `kubectl drain` treo vinh vien
+  # khi nang cap node. minAvailable: 1 voi deployment 1 replica cung treo y het.
+  maxUnavailable: {{ .Values.orderService.pdb.maxUnavailable | default 1 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: order-service

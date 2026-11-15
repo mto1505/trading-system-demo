@@ -24,7 +24,14 @@ postgres:
 
 kafka:
   enabled: true          # false ở prod → dùng managed Kafka
-  image: bitnami/kafka:3.7.1
+  # apache/kafka, KHONG phai bitnami: kafka-topics-job.yaml goi /opt/kafka/bin/*.sh
+  # (layout cua apache). Bitnami dat script o /opt/bitnami/kafka/bin va tu 2025
+  # da go image public tren Docker Hub -> ErrImagePull "not found".
+  # Dong bo voi k8s/base/infra/kafka.yaml.
+  image: apache/kafka:3.7.0
+  # Heap cua broker. PHAI thap hon resources.limits.memory it nhat ~250Mi.
+  # Ha limit ma quen ha dong nay = OOMKilled.
+  heapOpts: "-Xms512m -Xmx1g"
   resources:
     requests: { cpu: 200m, memory: 512Mi }
     limits: { memory: 1Gi }
@@ -32,7 +39,11 @@ kafka:
 
 kafkaTopicsJob:
   enabled: true          # false khi kafka.enabled=false (managed tự tạo topic)
-  image: bitnami/kafka:3.7.1
+  # apache/kafka, KHONG phai bitnami: kafka-topics-job.yaml goi /opt/kafka/bin/*.sh
+  # (layout cua apache). Bitnami dat script o /opt/bitnami/kafka/bin va tu 2025
+  # da go image public tren Docker Hub -> ErrImagePull "not found".
+  # Dong bo voi k8s/base/infra/kafka.yaml.
+  image: apache/kafka:3.7.0
 
 redis:
   enabled: true
@@ -44,6 +55,9 @@ redis:
 schemaRegistry:
   enabled: true
   image: confluentinc/cp-schema-registry:7.7.0
+  # Mac dinh cua image la -Xmx512M. Ha limits.memory xuong duoi do ma quen
+  # dong nay = OOMKilled luc khoi dong.
+  heapOpts: "-Xmx512m"
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 512Mi }
@@ -71,26 +85,48 @@ prometheus:
 # ---------------------------------------------------------------------------
 monitoring:
   enabled: false         # staging/prod bật
+  # Namespace cua kube-prometheus-stack. Dung de mo NetworkPolicy ingress cho scrape.
+  namespace: monitoring
+  # kube-prometheus-stack MAC DINH chi nhan PodMonitor/ServiceMonitor mang label
+  # `release: <ten-release-cua-stack>` (podMonitorSelector). Thieu label nay thi
+  # object van duoc tao ra nhung Prometheus KHONG BAO GIO doc toi.
+  # Kiem tra: kubectl -n monitoring get prometheus -o yaml | grep -A5 podMonitorSelector
+  extraLabels: {}
+    # release: kube-prometheus-stack
 
 # ---------------------------------------------------------------------------
 # KEDA: autoscale consumer theo Kafka lag
 # ---------------------------------------------------------------------------
 keda:
   enabled: false         # staging/prod bật
+  # Namespace cai KEDA operator. Dung cho NetworkPolicy mo duong cho no toi broker.
+  namespace: keda
   pollingInterval: 15
   cooldownPeriod: 120
+  # stabilizationWindowSeconds MOI la thu chong flapping khi minReplicaCount >= 1.
+  # cooldownPeriod cua KEDA CHI ap cho truong hop co ve 0 replica.
+  scaleDownStabilizationSeconds: 300
   pricingRiskService:
     minReplicaCount: 1
+    # maxReplicaCount KHONG duoc vuot partition / setConcurrency(3) trong
+    # pricing-risk-service/config/KafkaConfig.java. Prod 12 partition -> 4.
     maxReplicaCount: 4
-    topic: market.ticks.enriched
-    consumerGroup: pricing-risk-service
-    lagThreshold: "50"
+    # Topic + group PHAI khop @KafkaListener trong code:
+    #   TickConsumer.java  -> topics = "stock.ticks"
+    #   KafkaConfig.java   -> GROUP_ID_CONFIG = "pricing-risk-group"
+    topic: stock.ticks
+    consumerGroup: pricing-risk-group
+    # lagThreshold la lag TREN MOI REPLICA: desired = ceil(tong_lag / threshold).
+    lagThreshold: "1000"
+    activationLagThreshold: "100"
   matchingEngine:
     minReplicaCount: 1
     maxReplicaCount: 4
-    topic: orders.validated
-    consumerGroup: matching-engine
-    lagThreshold: "50"
+    # OrderConsumer.java -> topics = "stock.orders", groupId = "matching-engine-group"
+    topic: stock.orders
+    consumerGroup: matching-engine-group
+    lagThreshold: "500"
+    activationLagThreshold: "100"
 
 # ---------------------------------------------------------------------------
 # External Secrets (ESO): dùng cho prod thay vì secretGenerator
@@ -151,7 +187,9 @@ marketGateway:
     repository: ghcr.io/trading-system/market-gateway
     tag: ""
     digest: ""
-  port: 8080
+  # PHAI khop server.port trong market-gateway/src/main/resources/application.yml (8081).
+  # Sai port -> startupProbe khong bao gio 200 -> pod khong bao gio Ready.
+  port: 8081
   component: gateway
   resources:
     requests: { cpu: 200m, memory: 384Mi }
@@ -166,7 +204,8 @@ pricingRiskService:
     repository: ghcr.io/trading-system/pricing-risk-service
     tag: ""
     digest: ""
-  port: 8081
+  # PHAI khop server.port trong pricing-risk-service/.../application.yml (8082).
+  port: 8082
   component: pricing
   resources:
     requests: { cpu: 200m, memory: 384Mi }
@@ -199,7 +238,8 @@ orderService:
     waitForDb: true
   pdb:
     enabled: true
-    minAvailable: 1
+    # maxUnavailable, KHONG phai minAvailable — xem ghi chu trong templates/apps/order-service.yaml
+    maxUnavailable: 1
 
 matchingEngine:
   replicaCount: 1
@@ -207,7 +247,8 @@ matchingEngine:
     repository: ghcr.io/trading-system/matching-engine
     tag: ""
     digest: ""
-  port: 8082
+  # PHAI khop server.port trong matching-engine/.../application.yml (8084).
+  port: 8084
   component: matching
   resources:
     requests: { cpu: 200m, memory: 384Mi }
@@ -223,9 +264,55 @@ ingress:
   enabled: true
   className: nginx
   host: trading.local
+  # Namespace cua ingress controller — dung cho NetworkPolicy mo duong cho no.
+  controllerNamespace: ingress-nginx
+  # ---------------------------------------------------------------------------
+  # Route: moi muc sinh RA HAI thu — mot path trong Ingress VA mot NetworkPolicy
+  # cho phep nginx toi dung service do. Them route o day la du, khong phai sua
+  # cho nao khac.
+  #
+  # `service` phai la mot trong 4 ten co trong trading.servicePorts
+  # (_helpers.tpl), neu khong render se chet voi loi index nil.
+  #
+  # pathType Prefix: /api/v1/orders cung bat /api/v1/orders/{clientOrderId}.
+  # ---------------------------------------------------------------------------
+  routes:
+    - path: /api/v1/orders
+      service: order-service
+    - path: /api/v1/marketdata
+      service: pricing-risk-service
   tls:
     enabled: true
     secretName: trading-tls
+    # cert-manager Issuer tự ký, dùng cho môi trường KHÔNG ra được Internet
+    # (local/staging nội bộ) — nơi ACME/Let's Encrypt không chạy được.
+    #
+    # PHẢI khai báo ở đây dù mặc định là false: templates/ingress.yaml đọc
+    # .selfSignedIssuer.enabled, và nếu khoá này không tồn tại thì render CHẾT
+    # ngay khi tls.enabled=true:
+    #     nil pointer evaluating interface {}.enabled
+    # (dev và local thoát được chỉ vì tls.enabled=false làm `and` short-circuit
+    #  — một sự may mắn, không phải thiết kế.)
+    selfSignedIssuer:
+      enabled: false
+      name: selfsigned-issuer
+      # true  -> tạo CA gốc tự ký rồi dùng CA đó ký cert cho Ingress
+      #          (một CA duy nhất để tin tưởng, giống CA nội bộ thật)
+      # false -> Issuer tự ký thẳng cert cho Ingress (mỗi cert là một gốc riêng)
+      useCA: true
+      # CA TỰ MANG: tên Secret kubernetes.io/tls đã tạo sẵn (cùng namespace).
+      # Đặt giá trị này thì chart BỎ QUA useCA và không sinh CA nữa — nó chỉ tạo
+      # Issuer kind: ca trỏ vào Secret đó.
+      #
+      # Vì sao nên dùng: CA do cert-manager sinh gắn với vòng đời release; gỡ
+      # chart rồi cài lại là CA mới, thumbprint mới, và cái đã cài vào trust
+      # store của máy thành vô dụng. CA tự mang sống độc lập với Helm.
+      # Tạo bằng: scripts\helm\New-LocalCA.ps1
+      existingCaSecret: ""
+      caCommonName: trading-local-ca
+      caDuration: 8760h    # 1 năm
+      certDuration: 2160h  # 90 ngày — giống Let's Encrypt để lộ sớm lỗi gia hạn
+      certRenewBefore: 360h
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/use-regex: "true"

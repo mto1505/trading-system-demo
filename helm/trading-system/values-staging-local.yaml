@@ -1,0 +1,213 @@
+# =============================================================================
+# values-staging-local.yaml — LỚP PHỦ LÊN values-staging.yaml, KHÔNG thay thế nó.
+#
+# Mục tiêu: chạy ĐÚNG hình dạng staging (KEDA + monitoring + NetworkPolicy) trên
+# một node minikube nhỏ, để THỬ NGHIỆM — không phải để đo hiệu năng.
+#
+# Thứ tự -f có ý nghĩa, file sau đè file trước:
+#   helm upgrade --install trading ./helm/trading-system \
+#     -f ./helm/trading-system/values-staging.yaml \
+#     -f ./helm/trading-system/values-staging-local.yaml \
+#     -n trading-staging
+#
+# -----------------------------------------------------------------------------
+# NGÂN SÁCH RAM — đọc trước khi sửa bất kỳ con số nào
+# -----------------------------------------------------------------------------
+# Node minikube của máy này bị cgroup chặn ở 6144 Mi. CẢNH BÁO: `kubectl describe
+# node` KHÔNG nói thật — kubelet đọc /proc/meminfo nên báo RAM của HOST (15.6 GiB)
+# cho scheduler, trong khi cgroup giết ở 6 GiB. Scheduler sẽ vui vẻ xếp pod cho
+# đủ 16 GiB vào cái hộp 6 GiB rồi cả node thrashing. Con số THẬT lấy bằng:
+#
+#     docker stats minikube --no-stream
+#
+# Chi phí cố định đo được trên cluster này:
+#     kube-system (gồm calico, metrics-server)   ~1100 Mi
+#     kube-prometheus-stack                       ~930 Mi
+#     ingress-nginx + KEDA + dashboard            ~240 Mi
+#     -------------------------------------------------
+#     còn lại cho ứng dụng                       ~3800 Mi
+#
+# Cấu hình dưới đây đặt tổng requests ~1.8 GiB, tổng limits ~3.3 GiB → vừa khít.
+#
+# LƯU Ý: node này KHÔNG đủ chỗ cho hai stack cùng lúc. Namespace trading-dev
+# (Kustomize, `scripts\deploy-dev.ps1`) ngốn ~3000 Mi — dựng lại dev trong khi
+# staging đang chạy là cả node thrashing. Chạy một trong hai, không chạy cả hai.
+#
+# -----------------------------------------------------------------------------
+# QUY TẮC VÀNG KHI HẠ limits.memory
+# -----------------------------------------------------------------------------
+# Mọi service ở đây đều là JVM. Hạ limit mà quên hạ heap = OOMKilled, và
+# Kubernetes chỉ báo `Reason: OOMKilled` chứ không nói heap là thủ phạm.
+#
+#   4 service Java : Dockerfile đặt -XX:MaxRAMPercentage=75
+#                    -> heap TỰ bám theo limit. Chỉ cần sửa limit.
+#   kafka          : KAFKA_HEAP_OPTS — PHẢI sửa tay cùng lúc (kafka.heapOpts).
+#   schema-registry: mặc định image là -Xmx512M — PHẢI sửa tay (schemaRegistry.heapOpts).
+#   zipkin         : -XX:MaxRAMPercentage=70 -> tự bám theo limit.
+#   postgres/redis : không phải JVM, hạ thoải mái.
+#
+# Headroom giữa heap và limit (metaspace + thread stack + direct buffer):
+#   kafka broker   : ~250Mi (Netty direct buffer nhiều)
+#   service JVM nhỏ: ~150-190Mi là đủ
+#
+# -----------------------------------------------------------------------------
+# BA KHÁC BIỆT KHÁC so với staging thật, và LÝ DO
+# -----------------------------------------------------------------------------
+# 1. image.repository = trading/<module>, tag = staging-local
+#    minikube chạy containerd nên `minikube docker-env` vô dụng; đường duy nhất
+#    đưa image vào cluster là `minikube image load`. Image nạp kiểu đó KHÔNG có
+#    tiền tố registry. Để nguyên ghcr.io/... thì kubelet đi pull thật và chết
+#    ImagePullBackOff.
+#
+# 2. ingress.tls.enabled = false
+#    staging thật trông chờ secret `trading-tls` do cert-manager sinh. Trên
+#    minikube không có; bật TLS mà thiếu secret thì nginx phục vụ cert tự ký của
+#    chính nó và mọi curl đều phải --insecure.
+#
+# 3. orderService.replicaCount = 1 (staging thật là 2)
+#    Mỗi replica là một JVM ~450Mi. Replica thứ hai chỉ để chứng minh PDB và
+#    rolling update — không cần cho một lần thử chức năng.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 4 service Java — limit 448Mi -> heap 336Mi (MaxRAMPercentage=75)
+# Đủ cho Spring Boot + Kafka client + Hikari ở tải thử. Xuống dưới 384Mi là
+# bắt đầu GC liên tục rồi OOMKilled.
+# ---------------------------------------------------------------------------
+marketGateway:
+  image:
+    repository: trading/market-gateway
+    tag: staging-local
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 448Mi }
+
+pricingRiskService:
+  image:
+    repository: trading/pricing-risk-service
+    tag: staging-local
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 448Mi }
+
+orderService:
+  replicaCount: 1
+  image:
+    repository: trading/order-service
+    tag: staging-local
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 576Mi }   # nang nhat: 3 Kafka consumer + Redis + JPA + REST
+  pdb:
+    # 1 replica + PDB = `kubectl drain` treo. Tắt hẳn ở local.
+    enabled: false
+
+matchingEngine:
+  image:
+    repository: trading/matching-engine
+    tag: staging-local
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 448Mi }
+
+# ---------------------------------------------------------------------------
+# Hạ tầng
+# ---------------------------------------------------------------------------
+kafka:
+  # Hạ cùng lúc với limit bên dưới. 512m heap + ~250Mi non-heap = 768Mi.
+  heapOpts: "-Xms256m -Xmx512m"
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits: { memory: 768Mi }
+  storage: 1Gi
+
+schemaRegistry:
+  # Mặc định image là -Xmx512M, sẽ OOMKilled với limit 320Mi nếu không hạ.
+  heapOpts: "-Xmx192m"
+  resources:
+    requests: { cpu: 50m, memory: 160Mi }
+    limits: { memory: 384Mi }
+
+postgres:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+  storage: 1Gi
+
+redis:
+  resources:
+    # 32Mi là SÀN do limitRange.min.memory quy định — đặt thấp hơn là pod bị
+    # API server từ chối thẳng, không phải lỗi lúc chạy.
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { memory: 64Mi }
+
+zipkin:
+  # TẮT ở local. Zipkin cần ≥448Mi mới khởi động kịp ngân sách liveness
+  # (20s × 6 = 120s); dev cho nó 512Mi. Ở 192Mi thì heap ~134Mi, JVM boot quá
+  # chậm, chưa kịp mở port 9411 đã bị SIGKILL (exit 137) → restart vô hạn.
+  #
+  # Tracing không cần cho một lần thử chức năng. Muốn bật lại thì đặt
+  # enabled: true VÀ cho limit ít nhất 448Mi — đừng bật mà giữ limit nhỏ.
+  enabled: false
+
+# ---------------------------------------------------------------------------
+# KEDA — vẫn bật để thử autoscale, nhưng mỗi pod thêm là +448Mi
+# ---------------------------------------------------------------------------
+keda:
+  pricingRiskService:
+    minReplicaCount: 1
+    maxReplicaCount: 2
+    lagThreshold: "100"
+  matchingEngine:
+    minReplicaCount: 1
+    maxReplicaCount: 2
+    lagThreshold: "100"
+
+ingress:
+  host: trading-staging.local
+  tls:
+    # BẬT để test luồng tự động hoá của cert-manager bằng Issuer nội bộ.
+    # Khác với staging thật ở chỗ KHÔNG dùng ACME/Let's Encrypt — minikube
+    # không có domain công khai và không ra được Internet để qua HTTP-01.
+    #
+    # Yêu cầu: cert-manager phải được cài TRƯỚC, nếu không helm chết ngay ở
+    # render với "no matches for kind Issuer".
+    enabled: true
+    secretName: trading-tls
+    selfSignedIssuer:
+      enabled: true
+      name: trading-local-issuer
+      # CA TỰ TẠO (scripts/helm/New-LocalCA.ps1) thay vì để cert-manager sinh.
+      # Secret này nằm ngoài Helm nên `helm uninstall` không xoá, và CA giữ
+      # nguyên thumbprint qua mọi lần dựng lại cluster -> cài vào Windows MỘT lần.
+      existingCaSecret: trading-ca
+      # useCA bị BỎ QUA khi existingCaSecret có giá trị - giữ lại để quay về
+      # chế độ cert-manager tự sinh chỉ bằng cách xoá dòng existingCaSecret.
+      useCA: true
+      caCommonName: trading-local-ca
+
+# ---------------------------------------------------------------------------
+# ResourceQuota — đặt SÁT ngân sách thật, không đặt rộng rãi.
+#
+# Quota chặt là lưới an toàn: nếu ai đó nâng limit của một service mà quên ngân
+# sách node, pod sẽ bị từ chối với thông báo rõ ràng ("exceeded quota") thay vì
+# được xếp vào node rồi làm cả node thrashing — kiểu hỏng khó chẩn đoán hơn nhiều.
+#
+# limits.memory 4Gi = ~3.3Gi của cấu hình này + chỗ cho 2 pod KEDA scale thêm.
+# ---------------------------------------------------------------------------
+resourceQuota:
+  requests:
+    cpu: "2"
+    memory: 2560Mi
+  limits:
+    cpu: "6"
+    memory: 4608Mi
+  pods: "20"
+
+# ---------------------------------------------------------------------------
+# Tắt tracing cho khớp với zipkin.enabled=false ở trên. Để nguyên 0.3 thì 4
+# service vẫn cố gửi span tới http://zipkin:9411 và log đầy lỗi kết nối —
+# gây nhiễu khi đọc log tìm lỗi thật.
+# ---------------------------------------------------------------------------
+config:
+  TRACING_PROBABILITY: "0"

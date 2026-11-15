@@ -33,3 +33,12 @@ desktop.ini
 # Logs
 *.log
 logs/
+
+# Secret sinh tu dong cho Helm staging (scripts/helm/Deploy-Staging.ps1)
+helm/.secrets.*.env
+
+# CA noi bo do cert-manager sinh (lay lai bang kubectl bat cu luc nao)
+ca-local.crt
+
+# CA noi bo tu tao - KHOA RIENG, tuyet doi khong commit
+helm/.ca/

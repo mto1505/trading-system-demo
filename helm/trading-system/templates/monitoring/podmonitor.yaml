@@ -5,6 +5,9 @@ metadata:
   name: trading-apps
   labels:
     {{- include "trading.commonLabels" . | nindent 4 }}
+    {{- with .Values.monitoring.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   selector:
     matchLabels:

@@ -1,23 +1,37 @@
 {{- if .Values.networkPolicy.enabled }}
-# Ingress -> order-service
+{{- $ports := include "trading.servicePorts" . | fromYaml }}
+{{- /*
+Mo duong cho ingress-nginx toi TUNG service co route trong Ingress.
+
+Sinh tu CHINH .Values.ingress.routes nen khong the lech: them mot route la rule
+tuong ung co ngay. Thieu rule nay thi nginx nhan request roi treo toi timeout
+-> HTTP 504, va log cua app KHONG co gi vi goi tin chua bao gio toi noi.
+
+Cong tra tu trading.servicePorts (dung values cua tung service), khong viet cung.
+*/ -}}
+{{- range $i, $r := .Values.ingress.routes }}
+{{- if $i }}
+---
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-ingress-to-order-service
+  name: allow-ingress-to-{{ $r.service }}
   labels:
-    {{- include "trading.commonLabels" . | nindent 4 }}
+    {{- include "trading.commonLabels" $ | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: order-service
+      app.kubernetes.io/name: {{ $r.service }}
   policyTypes: [Ingress]
   ingress:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
+              kubernetes.io/metadata.name: {{ $.Values.ingress.controllerNamespace | default "ingress-nginx" }}
       ports:
-        - { protocol: TCP, port: {{ .Values.orderService.port }} }
+        - { protocol: TCP, port: {{ index $ports $r.service }} }
+{{- end }}
 ---
 # App -> infra egress (in-cluster)
 apiVersion: networking.k8s.io/v1
@@ -72,4 +86,67 @@ spec:
       ports:
         - { protocol: TCP, port: 9411 }
     {{- end }}
+---
+# Traffic VÀO 4 service Java từ hệ monitoring.
+#
+# Thiếu policy này là lỗi im lặng khó nhất của bộ chart: default-deny-all chặn
+# mọi ingress, PodMonitor vẫn tạo ra target trong Prometheus nhưng mọi scrape
+# timeout -> dashboard trống trơn mà không có log lỗi ở phía app.
+#
+# LƯU Ý: probe của kubelet xuất phát từ NODE, không đi qua NetworkPolicy, nên
+# liveness/readiness vẫn chạy dù không có rule ingress nào cho chúng.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trading-apps-ingress
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [gateway, pricing, order, matching]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # Stack ngoài (kube-prometheus-stack ở namespace monitoring)...
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.monitoring.namespace | default "monitoring" }}
+        # ...và Prometheus tối giản chạy trong chính namespace này (dev).
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { protocol: TCP, port: {{ .Values.marketGateway.port }} }
+        - { protocol: TCP, port: {{ .Values.pricingRiskService.port }} }
+        - { protocol: TCP, port: {{ .Values.orderService.port }} }
+        - { protocol: TCP, port: {{ .Values.matchingEngine.port }} }
+{{- if .Values.kafka.enabled }}
+---
+# Egress cho Job tạo topic.
+#
+# trading-apps-egress ở trên chọn pod theo part-of, nhưng pod của Job KHÔNG mang
+# label đó -> default-deny-all chặn nó gọi broker. Triệu chứng: Job lặp mãi
+# "... broker chua san sang" rồi chết sau backoffLimit, kéo cả `helm upgrade`
+# fail ở post-install hook trong khi Kafka hoàn toàn khoẻ mạnh.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: init-kafka-topics-egress
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: init-kafka-topics
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: kafka }
+      ports:
+        - { protocol: TCP, port: 9092 }
+{{- end }}
 {{- end }}

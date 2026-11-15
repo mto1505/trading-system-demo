@@ -1,0 +1,111 @@
+{{- if and .Values.ingress.enabled .Values.ingress.tls.enabled .Values.ingress.tls.selfSignedIssuer.enabled }}
+{{- $iss := .Values.ingress.tls.selfSignedIssuer }}
+{{/*
+Luồng tự động hoá TLS bằng cert-manager, KHÔNG cần Internet.
+
+BA CHẾ ĐỘ, chọn bằng values:
+
+  A. existingCaSecret: "<ten-secret>"   — CA TỰ MANG (khuyên dùng khi đã cài CA
+     vào trust store). Chart chỉ tạo Issuer kind: ca trỏ vào Secret có sẵn.
+     Secret đó KHÔNG do Helm quản, nên `helm uninstall` không xoá nó và CA sống
+     lâu hơn release. Tạo bằng scripts\helm\New-LocalCA.ps1.
+
+  B. useCA: true (mặc định)            — cert-manager TỰ sinh CA. Bốn mắt xích:
+       1. Issuer     <name>-root   kind: selfSigned  -> chỉ biết tự ký
+       2. Certificate <name>-ca    isCA: true        -> nhờ (1) ký ra CA gốc,
+                                                        lưu vào <name>-ca-key-pair
+       3. Issuer     <name>        kind: ca          -> dùng Secret ở (2) để ký
+       4. Ingress annotation cert-manager.io/issuer  -> cert-manager TỰ sinh
+                                                        Certificate cho host
+
+  C. useCA: false                      — Issuer selfSigned ký thẳng cho Ingress.
+     Gọn nhất nhưng mỗi cert là một gốc riêng, không có CA chung.
+
+CẠM BẪY CỦA CHẾ ĐỘ B: CA do cert-manager sinh gắn với vòng đời release. Gỡ chart
+rồi cài lại -> CA MỚI, thumbprint MỚI -> cái đã cài vào Windows thành vô dụng,
+phải cài lại. Chế độ A sinh ra để tránh đúng chuyện đó.
+
+Mắt xích cuối là thứ đáng test nhất ở cả ba chế độ: KHÔNG có object Certificate
+nào cho Ingress trong chart này. cert-manager đọc annotation + spec.tls rồi tự
+tạo. Nếu nó không chạy, Ingress vẫn tồn tại và nginx vẫn phục vụ HTTPS — bằng
+cert mặc định của chính nginx. Hỏng kiểu im lặng.
+
+Vì sao chế độ B cần hai Issuer: `selfSigned` không phải một thực thể nắm khoá mà
+là một CHẾ ĐỘ KÝ — "ký bằng chính khoá riêng của Certificate đang xin". Nó không
+có khoá nào, nên không ký được cho ai khác. Muốn có CA dùng chung thì phải nhờ
+nó ký ra một chứng chỉ có isCA: true trước (mắt 2), rồi mới tạo Issuer kind: ca
+(mắt 3) — cái này MỚI có khoá để ký cho người khác. Xem README mục 6.3.
+
+Issuer (namespaced) chứ không ClusterIssuer: mọi thứ nằm gọn trong namespace của
+release. Hệ quả cho chế độ A: Secret CA PHẢI nằm CÙNG namespace với Issuer.
+*/}}
+{{- if $iss.existingCaSecret }}
+# CHẾ ĐỘ A — CA tự mang. Chart không sinh CA, chỉ trỏ vào Secret đã có sẵn.
+# Secret phải là kiểu kubernetes.io/tls, chứa cert CA (tls.crt) và khoá riêng
+# của nó (tls.key), và phải nằm trong namespace này.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $iss.name }}
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+  annotations:
+    # Ghi lại nguồn gốc để người sau không đi tìm Certificate CA không tồn tại.
+    trading/ca-source: "external (existingCaSecret) - khong do Helm quan ly"
+spec:
+  ca:
+    secretName: {{ $iss.existingCaSecret }}
+{{- else if $iss.useCA }}
+# CHẾ ĐỘ B — cert-manager tự sinh CA.
+# (1) Issuer gốc: chỉ dùng một lần để ký ra CA ở bước (2).
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $iss.name }}-root
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+# (2) CA gốc tự ký. isCA: true là thứ cho phép nó ký cert khác.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $iss.name }}-ca
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: {{ $iss.caCommonName | default "trading-local-ca" }}
+  secretName: {{ $iss.name }}-ca-key-pair
+  duration: {{ $iss.caDuration | default "8760h" }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $iss.name }}-root
+    kind: Issuer
+    group: cert-manager.io
+---
+# (3) Issuer thật, ký bằng CA ở (2). Đây là cái Ingress trỏ tới.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $iss.name }}
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ $iss.name }}-ca-key-pair
+{{- else }}
+# CHẾ ĐỘ C — Issuer tự ký thẳng, không có CA chung.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $iss.name }}
+  labels:
+    {{- include "trading.commonLabels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+{{- end }}
+{{- end }}

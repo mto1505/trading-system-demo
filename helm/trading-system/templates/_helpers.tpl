@@ -118,3 +118,20 @@ Tương đương cơ chế name suffix hash của Kustomize.
 {{- define "trading.configChecksum" -}}
 checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
 {{- end -}}
+
+{{/*
+Bảng tra: tên Service -> cổng, dựng từ chính values của 4 service.
+
+Dùng ở CẢ ingress.yaml lẫn networkpolicy-apps.yaml. Lý do phải có:
+thêm một route vào Ingress mà quên mở NetworkPolicy tương ứng thì nginx nhận
+request rồi treo tới timeout -> HTTP 504, và log của app KHÔNG có gì cả vì gói
+tin chưa bao giờ tới nơi. Tra chung một bảng thì hai chỗ không thể lệch nhau.
+*/}}
+{{- define "trading.servicePorts" -}}
+{{- dict
+      "market-gateway"       .Values.marketGateway.port
+      "pricing-risk-service" .Values.pricingRiskService.port
+      "order-service"        .Values.orderService.port
+      "matching-engine"      .Values.matchingEngine.port
+    | toYaml -}}
+{{- end -}}

@@ -7,6 +7,14 @@ metadata:
     {{- include "trading.commonLabels" . | nindent 4 }}
   annotations:
     {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    {{- if and .Values.ingress.tls.enabled .Values.ingress.tls.selfSignedIssuer.enabled }}
+    # cert-manager doc annotation nay + spec.tls ben duoi roi TU tao mot
+    # Certificate va ghi ra Secret. KHONG co object Certificate nao cho Ingress
+    # trong chart - do la toan bo diem cua luong tu dong hoa nay.
+    cert-manager.io/issuer: {{ .Values.ingress.tls.selfSignedIssuer.name | default "selfsigned-issuer" }}
+    cert-manager.io/duration: {{ .Values.ingress.tls.selfSignedIssuer.certDuration | default "2160h" | quote }}
+    cert-manager.io/renew-before: {{ .Values.ingress.tls.selfSignedIssuer.certRenewBefore | default "360h" | quote }}
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   {{- if .Values.ingress.tls.enabled }}
@@ -19,11 +27,22 @@ spec:
     - host: {{ .Values.ingress.host }}
       http:
         paths:
-          - path: /api/v1/orders
-            pathType: Prefix
+          {{- /*
+          Route lay tu .Values.ingress.routes. CUNG danh sach do duoc
+          networkpolicy-apps.yaml dung de mo duong cho nginx toi tung service.
+          Them route o MOT cho la ca hai cho cung co - tranh canh them route
+          xong bi default-deny chan roi nhan 504 ma log app khong co gi.
+
+          Cong dung TEN "http" thay vi so: moi Service deu dat ten cong la http,
+          nen doi so cong trong values khong lam Ingress sai theo.
+          */ -}}
+          {{- range .Values.ingress.routes }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
             backend:
               service:
-                name: order-service
+                name: {{ .service }}
                 port:
                   name: http
+          {{- end }}
 {{- end }}

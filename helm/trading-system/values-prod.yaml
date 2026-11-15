@@ -35,17 +35,23 @@ prometheus:
 
 monitoring:
   enabled: true
+  namespace: monitoring
+  extraLabels:
+    release: kube-prometheus-stack
 
 keda:
   enabled: true
   pricingRiskService:
     minReplicaCount: 2
+    # 4 = KAFKA_PARTITIONS(12) / setConcurrency(3). Pod thu 5 join group va nhan
+    # ve KHONG partition nao. Muon cao hon phai TANG PARTITION truoc.
     maxReplicaCount: 4
-    lagThreshold: "50"
+    # lag TREN MOI REPLICA: tong lag 4000 -> 4 pod. Khop k8s/components/keda.
+    lagThreshold: "1000"
   matchingEngine:
     minReplicaCount: 2
     maxReplicaCount: 4
-    lagThreshold: "50"
+    lagThreshold: "500"
 
 externalSecrets:
   enabled: true

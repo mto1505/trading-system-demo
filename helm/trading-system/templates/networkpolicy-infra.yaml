@@ -23,6 +23,19 @@ spec:
         - podSelector:
             matchLabels: { app.kubernetes.io/name: init-kafka-topics }
       ports: [{ protocol: TCP, port: 9092 }]
+    {{- if .Values.keda.enabled }}
+    # KEDA operator chạy ở namespace RIÊNG và phải tự nối tới broker để đọc
+    # consumer lag. Thiếu rule này thì default-deny-all chặn nó, ScaledObject
+    # đứng mãi ở:
+    #   Ready=False  ScaledObjectCheckFailed
+    #   "error creating kafka client: ... dial tcp <kafka-pod-ip>:9092: i/o timeout"
+    # Deployment vẫn chạy bình thường nên rất dễ bỏ sót — autoscale chết im lặng.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.keda.namespace | default "keda" }}
+      ports: [{ protocol: TCP, port: 9092 }]
+    {{- end }}
     - from:
         - podSelector:
             matchLabels: { app.kubernetes.io/name: kafka }

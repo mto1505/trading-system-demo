@@ -1,10 +1,19 @@
 {{- if .Values.monitoring.enabled }}
+{{/*
+LƯU Ý: hiện KHÔNG Service hạ tầng nào trong chart này mang đồng thời
+`app.kubernetes.io/component: infra` và một port tên `metrics`, nên
+ServiceMonitor này không khớp target nào. Giữ lại làm điểm cắm sẵn cho
+kafka-exporter / postgres-exporter; khi thêm exporter hãy gắn đúng hai nhãn đó.
+*/}}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: trading-infra
   labels:
     {{- include "trading.commonLabels" . | nindent 4 }}
+    {{- with .Values.monitoring.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   selector:
     matchLabels:

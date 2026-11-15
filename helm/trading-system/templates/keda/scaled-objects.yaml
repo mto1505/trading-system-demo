@@ -1,4 +1,10 @@
 {{- if .Values.keda.enabled }}
+{{/*
+KEDA thay cho HPA-theo-CPU, vì với Kafka consumer CPU là tín hiệu SAI ở cả hai chiều:
+  - nghẽn I/O (chờ DB, chờ downstream ack): CPU thấp, lag hàng triệu -> HPA ngồi yên.
+  - GC nặng hoặc REST traffic cao: CPU cao, lag bằng 0 -> HPA scale vô ích.
+KEDA query thẳng Kafka: end offset trừ committed offset của consumer group = lag.
+*/}}
 # Scale pricing-risk-service theo consumer lag trên topic
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -15,13 +21,23 @@ spec:
   cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
   minReplicaCount: {{ .Values.keda.pricingRiskService.minReplicaCount }}
   maxReplicaCount: {{ .Values.keda.pricingRiskService.maxReplicaCount }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # ĐÂY mới là thứ chống flapping. cooldownPeriod của KEDA CHỈ áp cho
+          # trường hợp co về 0 replica, mà min >= 1 nên nó vô tác dụng.
+          stabilizationWindowSeconds: {{ .Values.keda.scaleDownStabilizationSeconds | default 300 }}
   triggers:
     - type: kafka
       metadata:
-        bootstrapServers: {{ .Values.config.KAFKA_BOOTSTRAP }}
+        # Đọc từ env của chính Deployment đích (qua envFrom trading-config),
+        # nên không phải nhắc lại địa chỉ Kafka ở đây — một nguồn sự thật.
+        bootstrapServersFromEnv: KAFKA_BOOTSTRAP
         consumerGroup: {{ .Values.keda.pricingRiskService.consumerGroup }}
         topic: {{ .Values.keda.pricingRiskService.topic }}
         lagThreshold: {{ .Values.keda.pricingRiskService.lagThreshold | quote }}
+        activationLagThreshold: {{ .Values.keda.pricingRiskService.activationLagThreshold | default "100" | quote }}
         offsetResetPolicy: latest
 ---
 # Scale matching-engine theo consumer lag trên topic
@@ -40,12 +56,18 @@ spec:
   cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
   minReplicaCount: {{ .Values.keda.matchingEngine.minReplicaCount }}
   maxReplicaCount: {{ .Values.keda.matchingEngine.maxReplicaCount }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: {{ .Values.keda.scaleDownStabilizationSeconds | default 300 }}
   triggers:
     - type: kafka
       metadata:
-        bootstrapServers: {{ .Values.config.KAFKA_BOOTSTRAP }}
+        bootstrapServersFromEnv: KAFKA_BOOTSTRAP
         consumerGroup: {{ .Values.keda.matchingEngine.consumerGroup }}
         topic: {{ .Values.keda.matchingEngine.topic }}
         lagThreshold: {{ .Values.keda.matchingEngine.lagThreshold | quote }}
+        activationLagThreshold: {{ .Values.keda.matchingEngine.activationLagThreshold | default "100" | quote }}
         offsetResetPolicy: latest
 {{- end }}

@@ -89,7 +89,10 @@ spec:
             - name: KAFKA_LOG_RETENTION_HOURS
               value: "72"
             - name: KAFKA_HEAP_OPTS
-              value: "-Xms512m -Xmx1g"
+              # Heap PHAI nho hon resources.limits.memory it nhat ~250Mi (metaspace,
+              # thread stack, direct buffer cua Netty). Ha limit ma quen ha heap la
+              # OOMKilled ngay khi broker nhan tai.
+              value: {{ .Values.kafka.heapOpts | default "-Xms512m -Xmx1g" | quote }}
           resources:
             {{- toYaml .Values.kafka.resources | nindent 12 }}
           startupProbe:
